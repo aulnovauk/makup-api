@@ -1,171 +1,1206 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Makeup AI</title>
-    <link rel="stylesheet" href="/static/style.css" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Makeup AI — Real-time Virtual Try-On</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  /* ── Reset + Variables ─────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0d0d12;
+    --surface:   #16161e;
+    --surface2:  #1e1e2a;
+    --border:    rgba(255,255,255,0.08);
+    --accent:    #c97eb2;
+    --accent2:   #7eb2c9;
+    --text:      #f0edf5;
+    --text-muted:#8a8699;
+    --radius:    12px;
+    --radius-sm: 8px;
+    --shadow:    0 8px 32px rgba(0,0,0,0.5);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ────────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(13,13,18,0.95);
+    backdrop-filter: blur(12px);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Playfair Display', serif;
+    font-size: 22px;
+    letter-spacing: 0.02em;
+  }
+  .logo-dot {
+    width: 10px; height: 10px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.5; transform: scale(0.8); }
+  }
+  .header-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #3fcf6a;
+  }
+  .status-dot.offline { background: #cf3f3f; }
+
+  /* ── Layout ────────────────────────────────────────── */
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 0;
+    height: calc(100vh - 61px);
+    overflow: hidden;
+  }
+
+  /* ── Camera / Preview Panel ─────────────────────────── */
+  .preview-panel {
+    position: relative;
+    background: #080810;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mode-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 14px 0;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .preview-area {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #videoEl, #canvasEl, #photoImg {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: none;
+  }
+  #canvasEl { display: block; }
+
+  .preview-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    color: var(--text-muted);
+  }
+  .preview-placeholder svg { opacity: 0.3; }
+  .preview-placeholder p { font-size: 14px; }
+
+  /* FPS badge */
+  .fps-badge {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    background: rgba(0,0,0,0.7);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #3fcf6a;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.05em;
+    display: none;
+  }
+
+  /* Processing spinner */
+  .processing-badge {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    background: rgba(201, 126, 178, 0.15);
+    border: 1px solid rgba(201, 126, 178, 0.3);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 11px;
+    color: var(--accent);
+    display: none;
+    align-items: center;
+    gap: 6px;
+  }
+  .spinner {
+    width: 10px; height: 10px;
+    border: 1.5px solid rgba(201,126,178,0.3);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Camera controls bar */
+  .controls-bar {
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+  }
+
+  .btn {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 18px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 400;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .btn:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.15); }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 500;
+  }
+  .btn.primary:hover { filter: brightness(1.1); }
+  .btn.danger {
+    background: rgba(207, 63, 63, 0.15);
+    border-color: rgba(207, 63, 63, 0.4);
+    color: #e07070;
+  }
+  .btn.danger:hover { background: rgba(207, 63, 63, 0.25); }
+  .btn svg { flex-shrink: 0; }
+
+  .btn-spacer { flex: 1; }
+
+  #photoUploadInput { display: none; }
+
+  /* ── Controls Panel (right sidebar) ─────────────────── */
+  .controls-panel {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .controls-panel::-webkit-scrollbar { width: 4px; }
+  .controls-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* Preset looks */
+  .looks-section {
+    padding: 18px 18px 0;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 18px;
+  }
+  .section-title {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+  .looks-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .look-btn {
+    padding: 10px 0;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 400;
+    cursor: pointer;
+    transition: all 0.18s;
+    text-align: center;
+  }
+  .look-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .look-btn.active {
+    background: rgba(201,126,178,0.12);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* Layer sections */
+  .layer-section {
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .layer-header {
+    display: flex;
+    align-items: center;
+    padding: 14px 18px;
+    cursor: pointer;
+    gap: 10px;
+    user-select: none;
+  }
+  .layer-header:hover { background: rgba(255,255,255,0.03); }
+
+  .toggle {
+    position: relative;
+    width: 34px; height: 18px;
+    flex-shrink: 0;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    transition: background 0.2s;
+    cursor: pointer;
+  }
+  .toggle input:checked ~ .toggle-track {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .toggle-thumb {
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 12px; height: 12px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+    pointer-events: none;
+  }
+  .toggle input:checked ~ .toggle-track .toggle-thumb {
+    transform: translateX(16px);
+  }
+
+  .layer-name {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+  }
+  .layer-chevron {
+    color: var(--text-muted);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+  .layer-section.open .layer-chevron { transform: rotate(180deg); }
+
+  .layer-body {
+    display: none;
+    padding: 4px 18px 16px;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .layer-section.open .layer-body { display: flex; }
+
+  /* Color swatches */
+  .swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .swatch {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: transform 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+  }
+  .swatch:hover { transform: scale(1.15); }
+  .swatch.active { border-color: #fff; transform: scale(1.1); }
+
+  /* Opacity slider */
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .slider-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    min-width: 52px;
+    letter-spacing: 0.03em;
+  }
+  .slider-val {
+    font-size: 11px;
+    color: var(--text-muted);
+    min-width: 30px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  input[type=range] {
+    flex: 1;
+    height: 3px;
+    -webkit-appearance: none;
+    background: var(--surface2);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+  /* ── Before/After toggle ─────────────────────────────── */
+  .ba-section {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ba-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .ba-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* ── Notification toast ──────────────────────────────── */
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 20px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    transition: transform 0.3s ease;
+    z-index: 999;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* ── Responsive ──────────────────────────────────────── */
+  @media (max-width: 800px) {
+    .layout { grid-template-columns: 1fr; height: auto; overflow: visible; }
+    .controls-panel { border-left: none; border-top: 1px solid var(--border); max-height: 60vh; }
+    .preview-panel { height: 50vh; }
+  }
+</style>
 </head>
 <body>
-    <header>
-        <div class="logo">💄</div>
-        <div>
-            <h1>Makeup AI</h1>
-            <p>Real-time Makeup Application</p>
+
+<!-- ── Header ──────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    Makeup AI
+  </div>
+  <div class="header-status">
+    <div class="status-dot" id="engineStatus"></div>
+    <span id="engineLabel">Checking...</span>
+  </div>
+</header>
+
+<!-- ── Main layout ─────────────────────────────────────── -->
+<div class="layout">
+
+  <!-- Left: Preview -->
+  <div class="preview-panel">
+
+    <div class="mode-tabs">
+      <button class="tab-btn active" onclick="switchMode('camera')" id="tabCamera">Live Camera</button>
+      <button class="tab-btn" onclick="switchMode('photo')" id="tabPhoto">Photo Upload</button>
+    </div>
+
+    <div class="preview-area" id="previewArea">
+      <video id="videoEl" autoplay muted playsinline></video>
+      <canvas id="canvasEl"></canvas>
+      <img id="photoImg" alt="Uploaded photo">
+
+      <div class="preview-placeholder" id="placeholder">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+        </svg>
+        <p>Start camera or upload a photo</p>
+      </div>
+
+      <div class="fps-badge" id="fpsBadge">0 fps</div>
+      <div class="processing-badge" id="processingBadge">
+        <div class="spinner"></div>
+        Processing
+      </div>
+    </div>
+
+    <div class="controls-bar">
+      <!-- Camera mode buttons -->
+      <div id="cameraControls" style="display:flex;gap:10px;width:100%;align-items:center">
+        <button class="btn primary" id="startBtn" onclick="startCamera()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          Start Camera
+        </button>
+        <button class="btn danger" id="stopBtn" onclick="stopCamera()" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          Stop
+        </button>
+        <div class="btn-spacer"></div>
+        <button class="btn" onclick="saveScreenshot()" id="screenshotBtn" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Screenshot
+        </button>
+      </div>
+
+      <!-- Photo mode buttons -->
+      <div id="photoControls" style="display:none;gap:10px;width:100%;align-items:center">
+        <button class="btn primary" onclick="document.getElementById('photoUploadInput').click()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Upload Photo
+        </button>
+        <input type="file" id="photoUploadInput" accept="image/*" onchange="handlePhotoUpload(event)">
+        <div class="btn-spacer"></div>
+        <button class="btn" onclick="saveScreenshot()" id="photoSaveBtn" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Save Result
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Controls -->
+  <div class="controls-panel">
+
+    <!-- Preset looks -->
+    <div class="looks-section">
+      <div class="section-title">Looks</div>
+      <div class="looks-grid">
+        <button class="look-btn" onclick="applyLook('natural')">Natural</button>
+        <button class="look-btn" onclick="applyLook('glam')">Glam</button>
+        <button class="look-btn" onclick="applyLook('smoky')">Smoky</button>
+        <button class="look-btn" onclick="applyLook('fresh')">Fresh</button>
+      </div>
+    </div>
+
+    <!-- Before/After toggle -->
+    <div class="ba-section">
+      <div class="ba-row">
+        <span class="ba-label">Before / After</span>
+        <label class="toggle">
+          <input type="checkbox" id="baToggle" onchange="toggleBA(this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Lipstick layer -->
+    <div class="layer-section open" id="layerLipstick">
+      <div class="layer-header" onclick="toggleLayer('Lipstick')">
+        <label class="toggle" onclick="event.stopPropagation()">
+          <input type="checkbox" id="togLipstick" checked onchange="updateParam('lipstick','enabled',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+        <span class="layer-name">Lipstick</span>
+        <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="layer-body">
+        <div class="swatches" id="swatchesLipstick"></div>
+        <div class="slider-row">
+          <span class="slider-label">Opacity</span>
+          <input type="range" min="5" max="95" value="45"
+                 oninput="updateParam('lipstick','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
+          <span class="slider-val">45%</span>
         </div>
-    </header>
+      </div>
+    </div>
 
-    <main>
-        <div class="tabs">
-            <button class="tab active" data-tab="camera">Live Camera</button>
-            <button class="tab" data-tab="upload">Photo Upload</button>
+    <!-- Lip Liner layer -->
+    <div class="layer-section" id="layerLipLiner">
+      <div class="layer-header" onclick="toggleLayer('LipLiner')">
+        <label class="toggle" onclick="event.stopPropagation()">
+          <input type="checkbox" id="togLipLiner" onchange="updateParam('lip_liner','enabled',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+        <span class="layer-name">Lip Liner</span>
+        <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="layer-body">
+        <div class="slider-row">
+          <span class="slider-label">Intensity</span>
+          <input type="range" min="5" max="95" value="60"
+                 oninput="updateParam('lip_liner','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
+          <span class="slider-val">60%</span>
         </div>
+      </div>
+    </div>
 
-        <div class="tab-content active" id="camera-tab">
-            <div class="workspace">
-                <div class="canvas-wrapper">
-                    <video id="webcam" autoplay playsinline style="display:none"></video>
-                    <canvas id="camera-canvas"></canvas>
-                    <div id="camera-status" class="status-msg">Click "Start Camera" to begin</div>
-                </div>
-                <div class="controls-panel">
-                    <button id="start-camera-btn" class="btn-primary">Start Camera</button>
-                    <button id="stop-camera-btn" class="btn-secondary" style="display:none">Stop Camera</button>
-
-                    <div class="control-section">
-                        <h3>Lipstick</h3>
-                        <label class="toggle-label">
-                            <input type="checkbox" id="lip-toggle" checked />
-                            <span>Enable</span>
-                        </label>
-                        <div class="color-row">
-                            <button class="color-swatch active" data-color="200,30,30" data-label="Red Rose" style="background:#c81e1e"></button>
-                            <button class="color-swatch" data-color="200,80,120" data-label="Pink Blush" style="background:#c85078"></button>
-                            <button class="color-swatch" data-color="210,100,60" data-label="Coral" style="background:#d2643c"></button>
-                            <button class="color-swatch" data-color="130,30,80" data-label="Berry Wine" style="background:#821e50"></button>
-                            <button class="color-swatch" data-color="180,130,110" data-label="Nude" style="background:#b4826e"></button>
-                            <button class="color-swatch" data-color="80,20,100" data-label="Deep Plum" style="background:#501464"></button>
-                        </div>
-                        <label class="slider-label">
-                            Opacity
-                            <input type="range" id="lip-opacity" min="0" max="100" value="40" />
-                        </label>
-                    </div>
-
-                    <div class="control-section">
-                        <h3>Eyeshadow</h3>
-                        <label class="toggle-label">
-                            <input type="checkbox" id="eye-toggle" checked />
-                            <span>Enable</span>
-                        </label>
-                        <div class="color-row" id="eye-colors">
-                            <button class="color-swatch active" data-color="100,70,50" data-label="Smoky Brown" style="background:#64463c"></button>
-                            <button class="color-swatch" data-color="180,120,100" data-label="Rose Gold" style="background:#b47864"></button>
-                            <button class="color-swatch" data-color="50,80,160" data-label="Ocean Blue" style="background:#3250a0"></button>
-                            <button class="color-swatch" data-color="40,100,60" data-label="Forest Green" style="background:#28643c"></button>
-                            <button class="color-swatch" data-color="120,60,140" data-label="Purple Haze" style="background:#783c8c"></button>
-                        </div>
-                        <label class="slider-label">
-                            Opacity
-                            <input type="range" id="eye-opacity" min="0" max="100" value="30" />
-                        </label>
-                    </div>
-
-                    <div class="control-section">
-                        <h3>Blush</h3>
-                        <label class="toggle-label">
-                            <input type="checkbox" id="blush-toggle" checked />
-                            <span>Enable</span>
-                        </label>
-                        <div class="color-row" id="blush-colors">
-                            <button class="color-swatch active" data-color="220,100,100" data-label="Rosy Pink" style="background:#dc6464"></button>
-                            <button class="color-swatch" data-color="210,130,90" data-label="Peach" style="background:#d2825a"></button>
-                            <button class="color-swatch" data-color="180,80,100" data-label="Mauve" style="background:#b45064"></button>
-                        </div>
-                        <label class="slider-label">
-                            Opacity
-                            <input type="range" id="blush-opacity" min="0" max="100" value="25" />
-                        </label>
-                    </div>
-                </div>
-            </div>
+    <!-- Eyeshadow layer -->
+    <div class="layer-section" id="layerEyeshadow">
+      <div class="layer-header" onclick="toggleLayer('Eyeshadow')">
+        <label class="toggle" onclick="event.stopPropagation()">
+          <input type="checkbox" id="togEyeshadow" onchange="updateParam('eyeshadow','enabled',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+        <span class="layer-name">Eyeshadow</span>
+        <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="layer-body">
+        <div class="swatches" id="swatchesEyeshadow"></div>
+        <div class="slider-row">
+          <span class="slider-label">Opacity</span>
+          <input type="range" min="5" max="90" value="30"
+                 oninput="updateParam('eyeshadow','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
+          <span class="slider-val">30%</span>
         </div>
+      </div>
+    </div>
 
-        <div class="tab-content" id="upload-tab">
-            <div class="workspace">
-                <div class="canvas-wrapper">
-                    <canvas id="upload-canvas"></canvas>
-                    <div id="upload-status" class="status-msg">Upload a photo to get started</div>
-                </div>
-                <div class="controls-panel">
-                    <label class="btn-primary upload-btn-label">
-                        Choose Photo
-                        <input type="file" id="photo-input" accept="image/*" hidden />
-                    </label>
-                    <button id="download-btn" class="btn-secondary" style="display:none">Download Result</button>
-
-                    <div class="control-section">
-                        <h3>Lipstick</h3>
-                        <label class="toggle-label">
-                            <input type="checkbox" id="upload-lip-toggle" checked />
-                            <span>Enable</span>
-                        </label>
-                        <div class="color-row" id="upload-lip-colors">
-                            <button class="color-swatch active" data-color="200,30,30" data-label="Red Rose" style="background:#c81e1e"></button>
-                            <button class="color-swatch" data-color="200,80,120" data-label="Pink Blush" style="background:#c85078"></button>
-                            <button class="color-swatch" data-color="210,100,60" data-label="Coral" style="background:#d2643c"></button>
-                            <button class="color-swatch" data-color="130,30,80" data-label="Berry Wine" style="background:#821e50"></button>
-                            <button class="color-swatch" data-color="180,130,110" data-label="Nude" style="background:#b4826e"></button>
-                            <button class="color-swatch" data-color="80,20,100" data-label="Deep Plum" style="background:#501464"></button>
-                        </div>
-                        <label class="slider-label">
-                            Opacity
-                            <input type="range" id="upload-lip-opacity" min="0" max="100" value="40" />
-                        </label>
-                    </div>
-
-                    <div class="control-section">
-                        <h3>Eyeshadow</h3>
-                        <label class="toggle-label">
-                            <input type="checkbox" id="upload-eye-toggle" checked />
-                            <span>Enable</span>
-                        </label>
-                        <div class="color-row" id="upload-eye-colors">
-                            <button class="color-swatch active" data-color="100,70,50" data-label="Smoky Brown" style="background:#64463c"></button>
-                            <button class="color-swatch" data-color="180,120,100" data-label="Rose Gold" style="background:#b47864"></button>
-                            <button class="color-swatch" data-color="50,80,160" data-label="Ocean Blue" style="background:#3250a0"></button>
-                            <button class="color-swatch" data-color="40,100,60" data-label="Forest Green" style="background:#28643c"></button>
-                            <button class="color-swatch" data-color="120,60,140" data-label="Purple Haze" style="background:#783c8c"></button>
-                        </div>
-                        <label class="slider-label">
-                            Opacity
-                            <input type="range" id="upload-eye-opacity" min="0" max="100" value="30" />
-                        </label>
-                    </div>
-
-                    <div class="control-section">
-                        <h3>Blush</h3>
-                        <label class="toggle-label">
-                            <input type="checkbox" id="upload-blush-toggle" checked />
-                            <span>Enable</span>
-                        </label>
-                        <div class="color-row" id="upload-blush-colors">
-                            <button class="color-swatch active" data-color="220,100,100" data-label="Rosy Pink" style="background:#dc6464"></button>
-                            <button class="color-swatch" data-color="210,130,90" data-label="Peach" style="background:#d2825a"></button>
-                            <button class="color-swatch" data-color="180,80,100" data-label="Mauve" style="background:#b45064"></button>
-                        </div>
-                        <label class="slider-label">
-                            Opacity
-                            <input type="range" id="upload-blush-opacity" min="0" max="100" value="25" />
-                        </label>
-                    </div>
-                </div>
-            </div>
+    <!-- Eyebrow layer -->
+    <div class="layer-section" id="layerEyebrow">
+      <div class="layer-header" onclick="toggleLayer('Eyebrow')">
+        <label class="toggle" onclick="event.stopPropagation()">
+          <input type="checkbox" id="togEyebrow" onchange="updateParam('eyebrow','enabled',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+        <span class="layer-name">Eyebrow Fill</span>
+        <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="layer-body">
+        <div class="swatches" id="swatchesEyebrow"></div>
+        <div class="slider-row">
+          <span class="slider-label">Opacity</span>
+          <input type="range" min="10" max="80" value="45"
+                 oninput="updateParam('eyebrow','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
+          <span class="slider-val">45%</span>
         </div>
-    </main>
+      </div>
+    </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1632432234/camera_utils.js"></script>
-    <script src="/static/makeup.js"></script>
+    <!-- Blush layer -->
+    <div class="layer-section" id="layerBlush">
+      <div class="layer-header" onclick="toggleLayer('Blush')">
+        <label class="toggle" onclick="event.stopPropagation()">
+          <input type="checkbox" id="togBlush" onchange="updateParam('blush','enabled',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+        <span class="layer-name">Blush</span>
+        <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="layer-body">
+        <div class="swatches" id="swatchesBlush"></div>
+        <div class="slider-row">
+          <span class="slider-label">Opacity</span>
+          <input type="range" min="5" max="60" value="20"
+                 oninput="updateParam('blush','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
+          <span class="slider-val">20%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Highlighter layer -->
+    <div class="layer-section" id="layerHighlighter">
+      <div class="layer-header" onclick="toggleLayer('Highlighter')">
+        <label class="toggle" onclick="event.stopPropagation()">
+          <input type="checkbox" id="togHighlighter" onchange="updateParam('highlighter','enabled',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+        <span class="layer-name">Highlighter</span>
+        <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="layer-body">
+        <div class="slider-row">
+          <span class="slider-label">Intensity</span>
+          <input type="range" min="5" max="60" value="25"
+                 oninput="updateParam('highlighter','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
+          <span class="slider-val">25%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Contour layer -->
+    <div class="layer-section" id="layerContour">
+      <div class="layer-header" onclick="toggleLayer('Contour')">
+        <label class="toggle" onclick="event.stopPropagation()">
+          <input type="checkbox" id="togContour" onchange="updateParam('contour','enabled',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+        <span class="layer-name">Contour</span>
+        <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="layer-body">
+        <div class="slider-row">
+          <span class="slider-label">Intensity</span>
+          <input type="range" min="5" max="60" value="20"
+                 oninput="updateParam('contour','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
+          <span class="slider-val">20%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Foundation layer -->
+    <div class="layer-section" id="layerFoundation">
+      <div class="layer-header" onclick="toggleLayer('Foundation')">
+        <label class="toggle" onclick="event.stopPropagation()">
+          <input type="checkbox" id="togFoundation" onchange="updateParam('foundation','enabled',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+        <span class="layer-name">Foundation</span>
+        <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="layer-body">
+        <div class="slider-row">
+          <span class="slider-label">Coverage</span>
+          <input type="range" min="5" max="40" value="12"
+                 oninput="updateParam('foundation','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
+          <span class="slider-val">12%</span>
+        </div>
+        <div class="slider-row">
+          <span class="slider-label">Smooth</span>
+          <label class="toggle" style="margin-left:auto">
+            <input type="checkbox" id="togSmooth" checked onchange="updateParam('foundation','smooth',this.checked)">
+            <div class="toggle-track"><div class="toggle-thumb"></div></div>
+          </label>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end controls-panel -->
+</div><!-- end layout -->
+
+<div id="toast"></div>
+
+<script>
+// ════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════
+const state = {
+  lipstick:    { enabled: true,  opacity: 0.45, color: [30,20,200] },
+  lip_liner:   { enabled: false, opacity: 0.60, color: [30,20,200] },
+  eyeshadow:   { enabled: false, opacity: 0.30, color: [40,60,100] },
+  eyebrow:     { enabled: false, opacity: 0.45, color: [30,45,80]  },
+  blush:       { enabled: false, opacity: 0.20, color: [140,130,230]},
+  highlighter: { enabled: false, opacity: 0.25 },
+  contour:     { enabled: false, opacity: 0.20 },
+  foundation:  { enabled: false, opacity: 0.12, smooth: true },
+};
+
+const PRESETS = {
+  lipstick: {
+    red_rose:     { bgr:[30,20,200],   hex:'#c81428', label:'Red Rose' },
+    pink_blush:   { bgr:[150,100,220], hex:'#dc6496', label:'Pink' },
+    coral_sunset: { bgr:[80,100,240],  hex:'#f06450', label:'Coral' },
+    berry_wine:   { bgr:[60,20,130],   hex:'#821432', label:'Berry' },
+    nude_beige:   { bgr:[130,150,190], hex:'#be9682', label:'Nude' },
+    deep_plum:    { bgr:[80,30,100],   hex:'#641e50', label:'Plum' },
+  },
+  eyeshadow: {
+    smoky_brown:  { bgr:[40,60,100],   hex:'#643c28', label:'Smoky' },
+    rose_gold:    { bgr:[100,120,200], hex:'#c87864', label:'Rose Gold' },
+    ocean_blue:   { bgr:[180,100,50],  hex:'#3264b4', label:'Blue' },
+    forest_green: { bgr:[60,130,60],   hex:'#3c823c', label:'Green' },
+    purple_haze:  { bgr:[150,60,130],  hex:'#823c96', label:'Purple' },
+  },
+  eyebrow: {
+    dark_brown:   { bgr:[30,45,80],    hex:'#502d1e', label:'Dark Brown' },
+    taupe:        { bgr:[90,100,130],  hex:'#82645a', label:'Taupe' },
+    black:        { bgr:[15,15,15],    hex:'#0f0f0f', label:'Black' },
+    auburn:       { bgr:[40,60,130],   hex:'#823c28', label:'Auburn' },
+  },
+  blush: {
+    soft_rose:    { bgr:[140,130,230], hex:'#e6828c', label:'Soft Rose' },
+    peach:        { bgr:[110,160,240], hex:'#f0a06e', label:'Peach' },
+    berry:        { bgr:[100,80,180],  hex:'#b45064', label:'Berry' },
+    bronze:       { bgr:[80,110,170],  hex:'#aa6e50', label:'Bronze' },
+  },
+};
+
+const LOOKS = {
+  natural: {
+    lipstick:    { enabled:true,  opacity:0.30, color:[130,150,190] },
+    lip_liner:   { enabled:false, opacity:0.20, color:[130,150,190] },
+    eyeshadow:   { enabled:false, opacity:0.15, color:[40,60,100]  },
+    eyebrow:     { enabled:true,  opacity:0.35, color:[90,100,130] },
+    blush:       { enabled:true,  opacity:0.15, color:[140,130,230]},
+    highlighter: { enabled:true,  opacity:0.20 },
+    contour:     { enabled:false, opacity:0.10 },
+    foundation:  { enabled:true,  opacity:0.12, smooth:true },
+  },
+  glam: {
+    lipstick:    { enabled:true,  opacity:0.65, color:[30,20,200]  },
+    lip_liner:   { enabled:true,  opacity:0.60, color:[30,20,200]  },
+    eyeshadow:   { enabled:true,  opacity:0.50, color:[40,60,100]  },
+    eyebrow:     { enabled:true,  opacity:0.60, color:[15,15,15]   },
+    blush:       { enabled:true,  opacity:0.30, color:[100,80,180] },
+    highlighter: { enabled:true,  opacity:0.45 },
+    contour:     { enabled:true,  opacity:0.35 },
+    foundation:  { enabled:true,  opacity:0.22, smooth:true },
+  },
+  smoky: {
+    lipstick:    { enabled:true,  opacity:0.55, color:[60,20,130]  },
+    lip_liner:   { enabled:true,  opacity:0.50, color:[60,20,130]  },
+    eyeshadow:   { enabled:true,  opacity:0.65, color:[40,60,100]  },
+    eyebrow:     { enabled:true,  opacity:0.55, color:[30,45,80]   },
+    blush:       { enabled:true,  opacity:0.25, color:[80,110,170] },
+    highlighter: { enabled:true,  opacity:0.30 },
+    contour:     { enabled:true,  opacity:0.40 },
+    foundation:  { enabled:true,  opacity:0.18, smooth:true },
+  },
+  fresh: {
+    lipstick:    { enabled:true,  opacity:0.35, color:[80,100,240] },
+    lip_liner:   { enabled:false, opacity:0.25, color:[80,100,240] },
+    eyeshadow:   { enabled:true,  opacity:0.20, color:[100,120,200]},
+    eyebrow:     { enabled:true,  opacity:0.40, color:[90,100,130] },
+    blush:       { enabled:true,  opacity:0.25, color:[110,160,240]},
+    highlighter: { enabled:true,  opacity:0.35 },
+    contour:     { enabled:false, opacity:0.10 },
+    foundation:  { enabled:true,  opacity:0.12, smooth:true },
+  },
+};
+
+// ════════════════════════════════════════════════════════
+//  MODE + CAMERA
+// ════════════════════════════════════════════════════════
+let mode       = 'camera';  // 'camera' | 'photo'
+let stream     = null;
+let animFrame  = null;
+let processing = false;
+let lastResult = null;      // last processed frame (for BA toggle)
+let showBA     = false;
+let lastRawFrame = null;    // raw unprocessed frame
+let fpsSmooth  = 0;
+let lastFrameT = 0;
+
+function switchMode(m) {
+  mode = m;
+  document.getElementById('tabCamera').classList.toggle('active', m === 'camera');
+  document.getElementById('tabPhoto').classList.toggle('active', m === 'photo');
+  document.getElementById('cameraControls').style.display = m === 'camera' ? 'flex' : 'none';
+  document.getElementById('photoControls').style.display  = m === 'photo'  ? 'flex' : 'none';
+  if (m === 'camera') {
+    document.getElementById('photoImg').style.display  = 'none';
+    document.getElementById('canvasEl').style.display  = 'block';
+  } else {
+    stopCamera();
+    document.getElementById('canvasEl').style.display = 'none';
+  }
+}
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width:1280, height:720 }, audio:false });
+    const vid = document.getElementById('videoEl');
+    vid.srcObject = stream;
+    await vid.play();
+    document.getElementById('startBtn').style.display    = 'none';
+    document.getElementById('stopBtn').style.display     = 'flex';
+    document.getElementById('screenshotBtn').style.display = 'flex';
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('fpsBadge').style.display    = 'block';
+    requestAnimationFrame(processLoop);
+    toast('Camera started');
+  } catch(e) {
+    toast('Camera error: ' + e.message);
+  }
+}
+
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  cancelAnimationFrame(animFrame);
+  document.getElementById('startBtn').style.display    = 'flex';
+  document.getElementById('stopBtn').style.display     = 'none';
+  document.getElementById('screenshotBtn').style.display = 'none';
+  document.getElementById('fpsBadge').style.display    = 'none';
+  document.getElementById('canvasEl').style.display    = 'block';
+}
+
+// ════════════════════════════════════════════════════════
+//  PROCESSING LOOP
+// ════════════════════════════════════════════════════════
+async function processLoop(ts) {
+  const vid = document.getElementById('videoEl');
+  if (!vid.videoWidth || !stream) return;
+
+  const canvas = document.getElementById('canvasEl');
+  const ctx    = canvas.getContext('2d');
+  canvas.width  = vid.videoWidth;
+  canvas.height = vid.videoHeight;
+
+  // Draw raw video frame
+  ctx.save();
+  ctx.scale(-1, 1);   // mirror
+  ctx.drawImage(vid, -canvas.width, 0, canvas.width, canvas.height);
+  ctx.restore();
+
+  // Capture raw frame for BA toggle
+  lastRawFrame = canvas.toDataURL('image/jpeg', 0.7);
+
+  // Send to server for makeup processing (throttled — skip if still busy)
+  if (!processing) {
+    processing = true;
+    document.getElementById('processingBadge').style.display = 'flex';
+
+    const imageData = canvas.toDataURL('image/jpeg', 0.75);
+
+    try {
+      const resp = await fetch('/api/apply', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ image: imageData, params: state }),
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+
+        if (data.result) {
+          lastResult = data.result;
+
+          // Draw result onto canvas
+          const img = new Image();
+          img.onload = () => {
+            if (!showBA) {
+              ctx.drawImage(img, 0, 0);
+            } else if (lastRawFrame) {
+              // Split screen: left = raw, right = makeup
+              const splitX = Math.floor(canvas.width / 2);
+              const rawImg = new Image();
+              rawImg.onload = () => {
+                ctx.drawImage(rawImg, 0, 0);                  // full raw
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(splitX, 0, canvas.width - splitX, canvas.height);
+                ctx.clip();
+                ctx.drawImage(img, 0, 0);                     // makeup on right
+                ctx.restore();
+                // Divider
+                ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(splitX, 0);
+                ctx.lineTo(splitX, canvas.height);
+                ctx.stroke();
+                // Labels
+                ctx.fillStyle = 'rgba(255,255,255,0.8)';
+                ctx.font = '13px "DM Sans", sans-serif';
+                ctx.fillText('BEFORE', 14, 28);
+                ctx.fillText('AFTER',  splitX + 14, 28);
+              };
+              rawImg.src = lastRawFrame;
+            }
+            img.src = '';   // help GC
+          };
+          img.src = data.result;
+        }
+
+        // FPS
+        const now  = performance.now();
+        const diff = now - lastFrameT;
+        lastFrameT = now;
+        if (diff > 0) {
+          const fps = 1000 / diff;
+          fpsSmooth = fpsSmooth * 0.85 + fps * 0.15;
+          document.getElementById('fpsBadge').textContent = Math.round(fpsSmooth) + ' fps';
+        }
+      }
+    } catch(e) {
+      // Network error — continue loop silently
+    } finally {
+      processing = false;
+      document.getElementById('processingBadge').style.display = 'none';
+    }
+  }
+
+  animFrame = requestAnimationFrame(processLoop);
+}
+
+// ════════════════════════════════════════════════════════
+//  PHOTO MODE
+// ════════════════════════════════════════════════════════
+async function handlePhotoUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  // Show original preview
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = document.getElementById('photoImg');
+    img.src = ev.target.result;
+    img.style.display = 'block';
+    document.getElementById('placeholder').style.display = 'none';
+    lastRawFrame = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+
+  // Send to server
+  document.getElementById('processingBadge').style.display = 'flex';
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('params', JSON.stringify(state));
+
+  try {
+    const resp = await fetch('/api/photo', { method:'POST', body: formData });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.result) {
+        lastResult = data.result;
+        const img  = document.getElementById('photoImg');
+        img.src    = data.result;
+        document.getElementById('photoSaveBtn').style.display = 'flex';
+        toast(`Processed in ${data.ms}ms`);
+      }
+    } else {
+      const err = await resp.json();
+      toast('Error: ' + (err.error || 'Unknown error'));
+    }
+  } catch(e) {
+    toast('Network error');
+  } finally {
+    document.getElementById('processingBadge').style.display = 'none';
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//  SCREENSHOT
+// ════════════════════════════════════════════════════════
+async function saveScreenshot() {
+  const imgData = (mode === 'photo')
+    ? document.getElementById('photoImg').src
+    : document.getElementById('canvasEl').toDataURL('image/jpeg', 0.95);
+
+  if (!imgData || imgData === 'data:,') { toast('Nothing to save'); return; }
+
+  try {
+    const resp = await fetch('/api/screenshot', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ image: imgData }),
+    });
+    const data = await resp.json();
+    if (resp.ok) {
+      // Also trigger a browser download
+      const a = document.createElement('a');
+      a.href     = imgData;
+      a.download = data.filename || 'makeup.jpg';
+      a.click();
+      toast('Saved: ' + data.filename);
+    }
+  } catch(e) {
+    // Fallback: direct browser download
+    const a = document.createElement('a');
+    a.href = imgData;
+    a.download = 'makeup_' + Date.now() + '.jpg';
+    a.click();
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//  STATE MANAGEMENT
+// ════════════════════════════════════════════════════════
+function updateParam(layer, key, value) {
+  if (!state[layer]) state[layer] = {};
+  state[layer][key] = value;
+
+  // If in photo mode with image loaded, re-apply
+  if (mode === 'photo' && lastRawFrame) {
+    reapplyPhoto();
+  }
+}
+
+async function reapplyPhoto() {
+  if (!lastRawFrame) return;
+  // Convert data URL to blob and re-upload
+  const resp  = await fetch(lastRawFrame);
+  const blob  = await resp.blob();
+  const file  = new File([blob], 'reapply.jpg', { type:'image/jpeg' });
+  const fd    = new FormData();
+  fd.append('file', file);
+  fd.append('params', JSON.stringify(state));
+
+  document.getElementById('processingBadge').style.display = 'flex';
+  try {
+    const r = await fetch('/api/photo', { method:'POST', body: fd });
+    if (r.ok) {
+      const d = await r.json();
+      if (d.result) {
+        document.getElementById('photoImg').src = d.result;
+        lastResult = d.result;
+      }
+    }
+  } finally {
+    document.getElementById('processingBadge').style.display = 'none';
+  }
+}
+
+function applyLook(name) {
+  const look = LOOKS[name];
+  if (!look) return;
+
+  // Merge look into state
+  Object.assign(state, JSON.parse(JSON.stringify(look)));
+
+  // Update all UI toggles to match
+  const mapping = {
+    lipstick: 'togLipstick', lip_liner: 'togLipLiner',
+    eyeshadow:'togEyeshadow', eyebrow:'togEyebrow',
+    blush:'togBlush', highlighter:'togHighlighter',
+    contour:'togContour', foundation:'togFoundation',
+  };
+  for (const [layer, id] of Object.entries(mapping)) {
+    const el = document.getElementById(id);
+    if (el && state[layer]) el.checked = state[layer].enabled;
+  }
+
+  // Update active look button
+  document.querySelectorAll('.look-btn').forEach(b => {
+    b.classList.toggle('active', b.textContent.toLowerCase() === name);
+  });
+
+  toast(name.charAt(0).toUpperCase() + name.slice(1) + ' look applied');
+
+  if (mode === 'photo' && lastRawFrame) reapplyPhoto();
+}
+
+function toggleBA(on) {
+  showBA = on;
+}
+
+// ════════════════════════════════════════════════════════
+//  UI HELPERS
+// ════════════════════════════════════════════════════════
+function toggleLayer(name) {
+  const el = document.getElementById('layer' + name);
+  if (el) el.classList.toggle('open');
+}
+
+function buildSwatches() {
+  const sections = [
+    { id:'swatchesLipstick',  layer:'lipstick',  key:'lipstick' },
+    { id:'swatchesEyeshadow', layer:'eyeshadow', key:'eyeshadow' },
+    { id:'swatchesEyebrow',   layer:'eyebrow',   key:'eyebrow' },
+    { id:'swatchesBlush',     layer:'blush',      key:'blush' },
+  ];
+
+  for (const { id, layer, key } of sections) {
+    const container = document.getElementById(id);
+    if (!container || !PRESETS[key]) continue;
+    container.innerHTML = '';
+
+    let firstKey = null;
+    for (const [name, preset] of Object.entries(PRESETS[key])) {
+      if (!firstKey) firstKey = name;
+      const s = document.createElement('div');
+      s.className = 'swatch' + (firstKey === name ? ' active' : '');
+      s.style.background = preset.hex;
+      s.title = preset.label;
+      s.dataset.layer = layer;
+      s.dataset.name  = name;
+      s.onclick = function() {
+        // Deactivate siblings
+        container.querySelectorAll('.swatch').forEach(sw => sw.classList.remove('active'));
+        s.classList.add('active');
+        updateParam(layer, 'color', preset.bgr);
+        // Sync lip liner color to lipstick color
+        if (layer === 'lipstick') updateParam('lip_liner', 'color', preset.bgr);
+      };
+      container.appendChild(s);
+    }
+  }
+}
+
+let _toastTimer = null;
+function toast(msg, duration = 2800) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), duration);
+}
+
+// ════════════════════════════════════════════════════════
+//  HEALTH CHECK
+// ════════════════════════════════════════════════════════
+async function checkHealth() {
+  try {
+    const r = await fetch('/health');
+    const d = await r.json();
+    const ok = d.status === 'ok' && d.engine;
+    document.getElementById('engineStatus').className = 'status-dot' + (ok ? '' : ' offline');
+    document.getElementById('engineLabel').textContent = ok ? 'Engine ready' : 'Engine offline';
+  } catch(e) {
+    document.getElementById('engineStatus').className = 'status-dot offline';
+    document.getElementById('engineLabel').textContent = 'Server offline';
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  buildSwatches();
+  checkHealth();
+  setInterval(checkHealth, 10000);
+});
+</script>
 </body>
 </html>
