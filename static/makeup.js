@@ -1,8 +1,12 @@
-const LIPS_OUTER = [61,146,91,181,84,17,314,405,321,375,291,308,324,318,402,317,14,87,178,88,95];
-const LEFT_EYE_SHADOW = [226,247,30,29,27,28,56,190,243,112,26,22,23,24,110,25];
-const RIGHT_EYE_SHADOW = [446,467,260,259,257,258,286,414,463,341,256,252,253,254,339,255];
-const LEFT_CHEEK = [116,123,147,213,192,214,210,211];
-const RIGHT_CHEEK = [345,352,376,433,416,434,430,431];
+const LIPS_UPPER_OUTER = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291];
+const LIPS_LOWER_OUTER = [291, 375, 321, 405, 314, 17, 84, 181, 91, 146, 61];
+const LIPS_FULL = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146];
+
+const LEFT_UPPER_LID = [226, 247, 30, 29, 27, 28, 56, 190, 173, 157, 158, 159, 160, 161, 246];
+const RIGHT_UPPER_LID = [446, 467, 260, 259, 257, 258, 286, 414, 398, 384, 385, 386, 387, 388, 466];
+
+const LEFT_CHEEK = [116, 123, 147, 213, 192, 214, 210, 211];
+const RIGHT_CHEEK = [345, 352, 376, 433, 416, 434, 430, 431];
 
 let cameraRunning = false;
 let faceMeshCamera = null;
@@ -36,23 +40,15 @@ function getSettings(prefix) {
     };
 }
 
-function drawPolygon(ctx, landmarks, indices, w, h) {
-    ctx.beginPath();
-    const first = landmarks[indices[0]];
-    ctx.moveTo(first.x * w, first.y * h);
-    for (let i = 1; i < indices.length; i++) {
-        const pt = landmarks[indices[i]];
-        ctx.lineTo(pt.x * w, pt.y * h);
-    }
-    ctx.closePath();
-}
-
 function smoothPolygon(ctx, landmarks, indices, w, h) {
     const pts = indices.map(i => ({ x: landmarks[i].x * w, y: landmarks[i].y * h }));
     if (pts.length < 3) return;
 
     ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
+
+    const startX = (pts[pts.length - 1].x + pts[0].x) / 2;
+    const startY = (pts[pts.length - 1].y + pts[0].y) / 2;
+    ctx.moveTo(startX, startY);
 
     for (let i = 0; i < pts.length; i++) {
         const curr = pts[i];
@@ -64,99 +60,100 @@ function smoothPolygon(ctx, landmarks, indices, w, h) {
     ctx.closePath();
 }
 
-function applyMakeup(canvas, landmarks, settings, sourceImage) {
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-
-    ctx.clearRect(0, 0, w, h);
-
-    if (sourceImage) {
-        ctx.drawImage(sourceImage, 0, 0, w, h);
-    }
-
+function drawMakeupRegion(ctx, landmarks, indices, w, h, r, g, b, opacity) {
     ctx.save();
+    smoothPolygon(ctx, landmarks, indices, w, h);
+    ctx.clip();
 
+    ctx.globalAlpha = opacity * 0.55;
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = opacity * 0.3;
+    ctx.fillStyle = `rgba(${r},${g},${b},1)`;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.restore();
+}
+
+function applyAllMakeup(ctx, landmarks, settings, w, h) {
     if (settings.lipEnabled) {
         const [r, g, b] = settings.lipColor;
+        drawMakeupRegion(ctx, landmarks, LIPS_FULL, w, h, r, g, b, settings.lipOpacity);
 
         ctx.save();
-        smoothPolygon(ctx, landmarks, LIPS_OUTER, w, h);
+        smoothPolygon(ctx, landmarks, LIPS_FULL, w, h);
         ctx.clip();
-
-        ctx.globalAlpha = settings.lipOpacity * 0.6;
-        ctx.globalCompositeOperation = 'multiply';
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(0, 0, w, h);
-
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = settings.lipOpacity * 0.35;
-        ctx.fillStyle = `rgba(${r},${g},${b},1)`;
-        ctx.fillRect(0, 0, w, h);
-
-        ctx.globalAlpha = settings.lipOpacity * 0.2;
-        const glossY = landmarks[13].y * h;
-        const glossX = ((landmarks[0].x + landmarks[267].x) / 2) * w;
-        const glossGrad = ctx.createRadialGradient(glossX, glossY, 0, glossX, glossY, 12);
-        glossGrad.addColorStop(0, 'rgba(255,255,255,0.7)');
+        ctx.globalAlpha = settings.lipOpacity * 0.15;
+        const upperCenter = landmarks[0];
+        const lowerCenter = landmarks[17];
+        const glossX = upperCenter.x * w;
+        const glossY = ((upperCenter.y + lowerCenter.y) / 2) * h;
+        const glossR = Math.abs(landmarks[291].x - landmarks[61].x) * w * 0.2;
+        const glossGrad = ctx.createRadialGradient(glossX, glossY, 0, glossX, glossY, glossR);
+        glossGrad.addColorStop(0, 'rgba(255,255,255,0.6)');
         glossGrad.addColorStop(1, 'rgba(255,255,255,0)');
         ctx.fillStyle = glossGrad;
         ctx.fillRect(0, 0, w, h);
-
         ctx.restore();
     }
 
     if (settings.eyeEnabled) {
         const [r, g, b] = settings.eyeColor;
-
-        [LEFT_EYE_SHADOW, RIGHT_EYE_SHADOW].forEach(indices => {
-            ctx.save();
-            smoothPolygon(ctx, landmarks, indices, w, h);
-            ctx.clip();
-
-            ctx.globalAlpha = settings.eyeOpacity * 0.5;
-            ctx.globalCompositeOperation = 'multiply';
-            ctx.fillStyle = `rgb(${r},${g},${b})`;
-            ctx.fillRect(0, 0, w, h);
-
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.globalAlpha = settings.eyeOpacity * 0.3;
-            ctx.fillStyle = `rgba(${r},${g},${b},1)`;
-            ctx.fillRect(0, 0, w, h);
-
-            ctx.restore();
-        });
+        drawMakeupRegion(ctx, landmarks, LEFT_UPPER_LID, w, h, r, g, b, settings.eyeOpacity);
+        drawMakeupRegion(ctx, landmarks, RIGHT_UPPER_LID, w, h, r, g, b, settings.eyeOpacity);
     }
 
     if (settings.blushEnabled) {
         const [r, g, b] = settings.blushColor;
 
         [LEFT_CHEEK, RIGHT_CHEEK].forEach(indices => {
-            const cx = indices.reduce((s, i) => s + landmarks[i].x, 0) / indices.length * w;
-            const cy = indices.reduce((s, i) => s + landmarks[i].y, 0) / indices.length * h;
-
+            let sumX = 0, sumY = 0;
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
             indices.forEach(i => {
-                minX = Math.min(minX, landmarks[i].x * w);
-                maxX = Math.max(maxX, landmarks[i].x * w);
-                minY = Math.min(minY, landmarks[i].y * h);
-                maxY = Math.max(maxY, landmarks[i].y * h);
+                const px = landmarks[i].x * w;
+                const py = landmarks[i].y * h;
+                sumX += px;
+                sumY += py;
+                minX = Math.min(minX, px);
+                maxX = Math.max(maxX, px);
+                minY = Math.min(minY, py);
+                maxY = Math.max(maxY, py);
             });
-            const radius = Math.max(maxX - minX, maxY - minY) * 0.8;
+
+            const cx = sumX / indices.length;
+            const regionH = maxY - minY;
+            const cy = sumY / indices.length - regionH * 0.25;
+
+            const radius = Math.max(maxX - minX, maxY - minY) * 0.45;
 
             ctx.save();
             ctx.globalAlpha = settings.blushOpacity;
             const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-            grad.addColorStop(0, `rgba(${r},${g},${b},0.45)`);
-            grad.addColorStop(0.5, `rgba(${r},${g},${b},0.2)`);
+            grad.addColorStop(0, `rgba(${r},${g},${b},0.4)`);
+            grad.addColorStop(0.4, `rgba(${r},${g},${b},0.25)`);
+            grad.addColorStop(0.7, `rgba(${r},${g},${b},0.08)`);
             grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
             ctx.fillStyle = grad;
             ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
             ctx.restore();
         });
     }
+}
 
-    ctx.restore();
+function applyMakeup(canvas, landmarks, settings, sourceImage) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.clearRect(0, 0, w, h);
+    if (sourceImage) {
+        ctx.drawImage(sourceImage, 0, 0, w, h);
+    }
+
+    applyAllMakeup(ctx, landmarks, settings, w, h);
 }
 
 function initFaceMesh(onResults) {
@@ -200,15 +197,7 @@ async function startCamera() {
                 z: p.z
             }));
             const settings = getSettings('camera');
-            if (!tempCanvas) {
-                tempCanvas = document.createElement('canvas');
-                tempCtx = tempCanvas.getContext('2d');
-            }
-            tempCanvas.width = w;
-            tempCanvas.height = h;
-            tempCtx.drawImage(canvas, 0, 0);
-
-            applyMakeupOverlay(canvas, lm, settings, tempCanvas);
+            applyAllMakeup(ctx, lm, settings, w, h);
             status.textContent = '';
         } else {
             status.textContent = 'No face detected - look at the camera';
@@ -238,98 +227,6 @@ async function startCamera() {
     } catch (err) {
         status.textContent = 'Camera access denied or unavailable: ' + err.message;
     }
-}
-
-function applyMakeupOverlay(canvas, landmarks, settings, baseImage) {
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-
-    ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(baseImage, 0, 0, w, h);
-
-    ctx.save();
-
-    if (settings.lipEnabled) {
-        const [r, g, b] = settings.lipColor;
-
-        ctx.save();
-        smoothPolygon(ctx, landmarks, LIPS_OUTER, w, h);
-        ctx.clip();
-
-        ctx.globalAlpha = settings.lipOpacity * 0.6;
-        ctx.globalCompositeOperation = 'multiply';
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(0, 0, w, h);
-
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = settings.lipOpacity * 0.35;
-        ctx.fillStyle = `rgba(${r},${g},${b},1)`;
-        ctx.fillRect(0, 0, w, h);
-
-        ctx.globalAlpha = settings.lipOpacity * 0.2;
-        const glossY = landmarks[13].y * h;
-        const glossX = ((landmarks[0].x + landmarks[267].x) / 2) * w;
-        const glossGrad = ctx.createRadialGradient(glossX, glossY, 0, glossX, glossY, 12);
-        glossGrad.addColorStop(0, 'rgba(255,255,255,0.7)');
-        glossGrad.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = glossGrad;
-        ctx.fillRect(0, 0, w, h);
-
-        ctx.restore();
-    }
-
-    if (settings.eyeEnabled) {
-        const [r, g, b] = settings.eyeColor;
-
-        [LEFT_EYE_SHADOW, RIGHT_EYE_SHADOW].forEach(indices => {
-            ctx.save();
-            smoothPolygon(ctx, landmarks, indices, w, h);
-            ctx.clip();
-
-            ctx.globalAlpha = settings.eyeOpacity * 0.5;
-            ctx.globalCompositeOperation = 'multiply';
-            ctx.fillStyle = `rgb(${r},${g},${b})`;
-            ctx.fillRect(0, 0, w, h);
-
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.globalAlpha = settings.eyeOpacity * 0.3;
-            ctx.fillStyle = `rgba(${r},${g},${b},1)`;
-            ctx.fillRect(0, 0, w, h);
-
-            ctx.restore();
-        });
-    }
-
-    if (settings.blushEnabled) {
-        const [r, g, b] = settings.blushColor;
-
-        [LEFT_CHEEK, RIGHT_CHEEK].forEach(indices => {
-            const cx = indices.reduce((s, i) => s + landmarks[i].x, 0) / indices.length * w;
-            const cy = indices.reduce((s, i) => s + landmarks[i].y, 0) / indices.length * h;
-
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            indices.forEach(i => {
-                minX = Math.min(minX, landmarks[i].x * w);
-                maxX = Math.max(maxX, landmarks[i].x * w);
-                minY = Math.min(minY, landmarks[i].y * h);
-                maxY = Math.max(maxY, landmarks[i].y * h);
-            });
-            const radius = Math.max(maxX - minX, maxY - minY) * 0.8;
-
-            ctx.save();
-            ctx.globalAlpha = settings.blushOpacity;
-            const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-            grad.addColorStop(0, `rgba(${r},${g},${b},0.45)`);
-            grad.addColorStop(0.5, `rgba(${r},${g},${b},0.2)`);
-            grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-            ctx.fillStyle = grad;
-            ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
-            ctx.restore();
-        });
-    }
-
-    ctx.restore();
 }
 
 function stopCamera() {
