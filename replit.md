@@ -5,14 +5,22 @@ A deep learning computer vision project for automated makeup transfer. Evolved t
 
 ## Web Interface
 Interactive web app with two modes:
-- **Live Camera**: Real-time webcam makeup using browser MediaPipe Face Mesh JS + Canvas API
+- **Live Camera**: Real-time webcam makeup with server-side processing via MediaPipe FaceLandmarker + OpenCV
 - **Photo Upload**: Upload a face photo, detect landmarks, apply makeup effects, download result
 
-All face detection and makeup rendering happens client-side in the browser.
+The frontend sends frames/photos to the Flask backend, which uses MediaPipe FaceLandmarker (tasks API) and OpenCV for face detection and makeup rendering, then returns the processed image.
 
 ### Controls
-- Lipstick, Eyeshadow, Blush: each with enable toggle, color swatches, and opacity slider
-- Landmark indices match the Python codebase (`histogram.py`)
+- Lipstick, Lip Liner, Eyeshadow, Eyebrow Fill, Blush, Highlighter, Contour, Foundation
+- Each with enable toggle, color swatches, and opacity slider
+- Preset looks: Natural, Glam, Smoky, Fresh
+- Before/After comparison toggle
+
+## Architecture (Server-Side Processing)
+- **WebMakeupEngine**: Self-contained makeup rendering engine using MediaPipe FaceLandmarker (tasks API v0.10.33+) and OpenCV
+- **FaceLandmarker model**: `face_landmarker.task` (downloaded from Google's model hub)
+- **Rendering pipeline**: HSV color blending with bilateral filtering for natural look
+- **Routes**: `/` (UI), `/health`, `/api/apply` (webcam frames), `/api/photo` (uploads), `/api/presets`, `/api/screenshot`
 
 ## Architecture (Phase 3 - ML Pipeline)
 - **Generator**: U-Net Generator (`generator.py`)
@@ -27,12 +35,14 @@ All face detection and makeup rendering happens client-side in the browser.
 - **Python 3.12** — runtime
 - **Flask** — web server
 - **Gunicorn** — production WSGI server
-- **MediaPipe Face Mesh JS** — browser-side face landmark detection (468 points)
-- **Canvas API** — client-side makeup rendering
+- **OpenCV (opencv-python-headless)** — image processing, color blending
+- **MediaPipe 0.10.33+** — face landmark detection (tasks API with FaceLandmarker)
+- **NumPy** — array operations
 - **PyTorch** — deep learning & GAN training (backend)
-- **OpenCV** — image processing (backend)
-- **MediaPipe Python** — face landmarks (backend)
 - **ONNX** — model export for production
+
+## System Dependencies
+- `xorg.libxcb`, `xorg.libX11`, `libGL`, `libz`, `glib` — required by OpenCV/MediaPipe
 
 ## Running the App
 - Development: `python app.py` (port 5000)
@@ -41,10 +51,9 @@ All face detection and makeup rendering happens client-side in the browser.
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `app.py` | Flask web server |
-| `templates/index.html` | Main UI template |
-| `static/style.css` | Styling |
-| `static/makeup.js` | Client-side face detection & makeup rendering |
+| `app.py` | Flask web server + WebMakeupEngine (server-side rendering) |
+| `templates/index.html` | Main UI template (inline CSS/JS) |
+| `face_landmarker.task` | MediaPipe face landmark model file |
 | `beautygan.py` | Unified GAN wrapper |
 | `generator.py` | U-Net Generator |
 | `losses.py` | GAN + perceptual loss |
