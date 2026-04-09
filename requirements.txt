@@ -1,0 +1,8 @@
+# ─────────────────────────────────────
+#  MAKEUP AI - Phase 1 Requirements
+#  Install with: pip install -r requirements.txt
+# ─────────────────────────────────────
+
+mediapipe==0.10.9
+opencv-python==4.9.0.80
+numpy==1.26.4
