@@ -180,9 +180,11 @@ async function startCamera() {
     status.textContent = 'Loading face detection model...';
 
     faceMeshCamera = initFaceMesh((results) => {
-        const w = canvas.width = results.image.width || 640;
-        const h = canvas.height = results.image.height || 480;
+        const w = canvas.width = results.image.width || 1280;
+        const h = canvas.height = results.image.height || 720;
         const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
 
         ctx.save();
         ctx.translate(w, 0);
@@ -206,7 +208,12 @@ async function startCamera() {
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 640, height: 480, facingMode: 'user' }
+            video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                facingMode: 'user',
+                frameRate: { ideal: 30 }
+            }
         });
         video.srcObject = stream;
         await video.play();
