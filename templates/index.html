@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Makeup AI</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <header>
+        <div class="logo">💄</div>
+        <div>
+            <h1>Makeup AI</h1>
+            <p>Real-time Makeup Application</p>
+        </div>
+    </header>
+
+    <main>
+        <div class="tabs">
+            <button class="tab active" data-tab="camera">Live Camera</button>
+            <button class="tab" data-tab="upload">Photo Upload</button>
+        </div>
+
+        <div class="tab-content active" id="camera-tab">
+            <div class="workspace">
+                <div class="canvas-wrapper">
+                    <video id="webcam" autoplay playsinline style="display:none"></video>
+                    <canvas id="camera-canvas"></canvas>
+                    <div id="camera-status" class="status-msg">Click "Start Camera" to begin</div>
+                </div>
+                <div class="controls-panel">
+                    <button id="start-camera-btn" class="btn-primary">Start Camera</button>
+                    <button id="stop-camera-btn" class="btn-secondary" style="display:none">Stop Camera</button>
+
+                    <div class="control-section">
+                        <h3>Lipstick</h3>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="lip-toggle" checked />
+                            <span>Enable</span>
+                        </label>
+                        <div class="color-row">
+                            <button class="color-swatch active" data-color="200,30,30" data-label="Red Rose" style="background:#c81e1e"></button>
+                            <button class="color-swatch" data-color="200,80,120" data-label="Pink Blush" style="background:#c85078"></button>
+                            <button class="color-swatch" data-color="210,100,60" data-label="Coral" style="background:#d2643c"></button>
+                            <button class="color-swatch" data-color="130,30,80" data-label="Berry Wine" style="background:#821e50"></button>
+                            <button class="color-swatch" data-color="180,130,110" data-label="Nude" style="background:#b4826e"></button>
+                            <button class="color-swatch" data-color="80,20,100" data-label="Deep Plum" style="background:#501464"></button>
+                        </div>
+                        <label class="slider-label">
+                            Opacity
+                            <input type="range" id="lip-opacity" min="0" max="100" value="40" />
+                        </label>
+                    </div>
+
+                    <div class="control-section">
+                        <h3>Eyeshadow</h3>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="eye-toggle" checked />
+                            <span>Enable</span>
+                        </label>
+                        <div class="color-row" id="eye-colors">
+                            <button class="color-swatch active" data-color="100,70,50" data-label="Smoky Brown" style="background:#64463c"></button>
+                            <button class="color-swatch" data-color="180,120,100" data-label="Rose Gold" style="background:#b47864"></button>
+                            <button class="color-swatch" data-color="50,80,160" data-label="Ocean Blue" style="background:#3250a0"></button>
+                            <button class="color-swatch" data-color="40,100,60" data-label="Forest Green" style="background:#28643c"></button>
+                            <button class="color-swatch" data-color="120,60,140" data-label="Purple Haze" style="background:#783c8c"></button>
+                        </div>
+                        <label class="slider-label">
+                            Opacity
+                            <input type="range" id="eye-opacity" min="0" max="100" value="30" />
+                        </label>
+                    </div>
+
+                    <div class="control-section">
+                        <h3>Blush</h3>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="blush-toggle" checked />
+                            <span>Enable</span>
+                        </label>
+                        <div class="color-row" id="blush-colors">
+                            <button class="color-swatch active" data-color="220,100,100" data-label="Rosy Pink" style="background:#dc6464"></button>
+                            <button class="color-swatch" data-color="210,130,90" data-label="Peach" style="background:#d2825a"></button>
+                            <button class="color-swatch" data-color="180,80,100" data-label="Mauve" style="background:#b45064"></button>
+                        </div>
+                        <label class="slider-label">
+                            Opacity
+                            <input type="range" id="blush-opacity" min="0" max="100" value="25" />
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-content" id="upload-tab">
+            <div class="workspace">
+                <div class="canvas-wrapper">
+                    <canvas id="upload-canvas"></canvas>
+                    <div id="upload-status" class="status-msg">Upload a photo to get started</div>
+                </div>
+                <div class="controls-panel">
+                    <label class="btn-primary upload-btn-label">
+                        Choose Photo
+                        <input type="file" id="photo-input" accept="image/*" hidden />
+                    </label>
+                    <button id="download-btn" class="btn-secondary" style="display:none">Download Result</button>
+
+                    <div class="control-section">
+                        <h3>Lipstick</h3>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="upload-lip-toggle" checked />
+                            <span>Enable</span>
+                        </label>
+                        <div class="color-row" id="upload-lip-colors">
+                            <button class="color-swatch active" data-color="200,30,30" data-label="Red Rose" style="background:#c81e1e"></button>
+                            <button class="color-swatch" data-color="200,80,120" data-label="Pink Blush" style="background:#c85078"></button>
+                            <button class="color-swatch" data-color="210,100,60" data-label="Coral" style="background:#d2643c"></button>
+                            <button class="color-swatch" data-color="130,30,80" data-label="Berry Wine" style="background:#821e50"></button>
+                            <button class="color-swatch" data-color="180,130,110" data-label="Nude" style="background:#b4826e"></button>
+                            <button class="color-swatch" data-color="80,20,100" data-label="Deep Plum" style="background:#501464"></button>
+                        </div>
+                        <label class="slider-label">
+                            Opacity
+                            <input type="range" id="upload-lip-opacity" min="0" max="100" value="40" />
+                        </label>
+                    </div>
+
+                    <div class="control-section">
+                        <h3>Eyeshadow</h3>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="upload-eye-toggle" checked />
+                            <span>Enable</span>
+                        </label>
+                        <div class="color-row" id="upload-eye-colors">
+                            <button class="color-swatch active" data-color="100,70,50" data-label="Smoky Brown" style="background:#64463c"></button>
+                            <button class="color-swatch" data-color="180,120,100" data-label="Rose Gold" style="background:#b47864"></button>
+                            <button class="color-swatch" data-color="50,80,160" data-label="Ocean Blue" style="background:#3250a0"></button>
+                            <button class="color-swatch" data-color="40,100,60" data-label="Forest Green" style="background:#28643c"></button>
+                            <button class="color-swatch" data-color="120,60,140" data-label="Purple Haze" style="background:#783c8c"></button>
+                        </div>
+                        <label class="slider-label">
+                            Opacity
+                            <input type="range" id="upload-eye-opacity" min="0" max="100" value="30" />
+                        </label>
+                    </div>
+
+                    <div class="control-section">
+                        <h3>Blush</h3>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="upload-blush-toggle" checked />
+                            <span>Enable</span>
+                        </label>
+                        <div class="color-row" id="upload-blush-colors">
+                            <button class="color-swatch active" data-color="220,100,100" data-label="Rosy Pink" style="background:#dc6464"></button>
+                            <button class="color-swatch" data-color="210,130,90" data-label="Peach" style="background:#d2825a"></button>
+                            <button class="color-swatch" data-color="180,80,100" data-label="Mauve" style="background:#b45064"></button>
+                        </div>
+                        <label class="slider-label">
+                            Opacity
+                            <input type="range" id="upload-blush-opacity" min="0" max="100" value="25" />
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1632432234/camera_utils.js"></script>
+    <script src="/static/makeup.js"></script>
+</body>
+</html>
