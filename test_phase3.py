@@ -99,9 +99,9 @@ def _mask(b: int = 1, h: int = 64, w: int = 64) -> torch.Tensor:
 class TestUNetGenerator:
 
     def test_output_shape_matches_input(self, generator):
-        """Generator output must have same spatial dims as input."""
-        src = _rand(1, 3, 256, 256)
-        ref = _rand(1, 3, 256, 256)
+        """Generator output must have SAME spatial dims as input (P-01 fix)."""
+        src = _rand(1, 3, 128, 128)
+        ref = _rand(1, 3, 128, 128)
         with torch.no_grad():
             out = generator(src, ref)
         assert out.shape == src.shape, \
@@ -117,12 +117,12 @@ class TestUNetGenerator:
         assert out.max().item() <=  1.01, "Output above  1"
 
     def test_batch_size_2(self, generator):
-        """Generator must handle batch_size > 1."""
+        """Generator must handle batch_size > 1. Output same H×W as input."""
         src = _rand(2, 3, 64, 64)
         ref = _rand(2, 3, 64, 64)
         with torch.no_grad():
             out = generator(src, ref)
-        assert out.shape == (2, 3, 64, 64)
+        assert out.shape == src.shape, f"Expected {src.shape}, got {out.shape}"
 
     def test_different_source_different_output(self, generator):
         """Different sources must produce different outputs."""
@@ -285,7 +285,7 @@ class TestLosses:
         gen        = G(src, ref)
         fake_fp, fake_lp = D(gen, ref, mask)
 
-        total, d = gan_loss.generator_loss(gen, tgt, ref, fake_fp, fake_lp, mask)
+        total, d = gan_loss.generator_loss(gen, tgt, ref, src, fake_fp, fake_lp, mask)
         assert isinstance(total, torch.Tensor), "total must be a Tensor"
         assert isinstance(d,     dict),         "loss_dict must be a dict"
         for k, v in d.items():
@@ -641,6 +641,7 @@ if __name__ == "__main__":
         TestDataset,
         TestInferenceUtils,
         TestHistogramUtils,
+        TestTrainerInternals,
     ]
 
     for cls in test_classes:

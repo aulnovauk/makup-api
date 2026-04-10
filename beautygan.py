@@ -56,10 +56,12 @@ class BeautyGAN(nn.Module):
 
     def __init__(
         self,
-        in_channels:   int = 6,
-        out_channels:  int = 3,
-        base_features: int = 64,
-        n_residual:    int = 6,
+        in_channels:   int   = 6,
+        out_channels:  int   = 3,
+        base_features: int   = 64,
+        n_residual:    int   = 6,
+        use_attention: bool  = True,
+        use_spec_norm: bool  = True,
     ) -> None:
         super().__init__()
         self.G = UNetGenerator(
@@ -67,6 +69,8 @@ class BeautyGAN(nn.Module):
             out_channels=out_channels,
             base_features=base_features,
             n_residual=n_residual,
+            use_attention=use_attention,
+            use_spec_norm=use_spec_norm,
         )
         self.D = DualDiscriminator()
         log.info(f"BeautyGAN initialised — {self.summary()}")

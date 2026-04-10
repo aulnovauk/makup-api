@@ -166,13 +166,40 @@ def match_makeup_colours(
         _RIGHT_CHEEK,
     ]
 
-    # Build masks for source (region to modify) and reference (colour source)
+    # Build masks: mask_src = where to apply changes on source,
+    # mask_ref = which reference pixels to sample histogram from.
+    # Both are passed to match_histograms_region so it samples source
+    # pixels via mask_src and reference pixels via mask_ref independently.
     mask_src = build_makeup_mask(source_bgr,    regions, landmarks_src)
     mask_ref = build_makeup_mask(reference_bgr, regions, landmarks_ref)
 
-    # Match source region → reference region histogram
-    result = match_histograms_region(result, reference_bgr, mask_src, strength)
-    return result
+    # Apply per-channel histogram matching region-by-region
+    # Use mask_src for source selection, mask_ref for reference colour sampling
+    result_f = result.astype(np.float32)
+    ref_f    = reference_bgr.astype(np.float32)
+    bool_src = mask_src > 127
+    bool_ref = mask_ref > 127
+
+    for c in range(3):
+        src_vals = result_f[bool_src, c]
+        ref_vals = ref_f[bool_ref, c]
+        if src_vals.size < 5 or ref_vals.size < 5:
+            continue
+        src_hist, _ = np.histogram(src_vals, bins=256, range=(0, 256), density=True)
+        ref_hist, _ = np.histogram(ref_vals, bins=256, range=(0, 256), density=True)
+        src_cdf = np.cumsum(src_hist); src_cdf /= src_cdf[-1] + 1e-8
+        ref_cdf = np.cumsum(ref_hist); ref_cdf /= ref_cdf[-1] + 1e-8
+        lut = np.zeros(256, dtype=np.float32)
+        j = 0
+        for i in range(256):
+            while j < 255 and ref_cdf[j] < src_cdf[i]:
+                j += 1
+            lut[i] = float(j)
+        matched = np.interp(src_vals, np.arange(256), lut)
+        blended = src_vals * (1.0 - strength) + matched * strength
+        result_f[bool_src, c] = blended
+
+    return np.clip(result_f, 0, 255).astype(np.uint8)
 
 
 # ─────────────────────────────────────────────────────────
@@ -210,19 +237,22 @@ def postprocess_neural_output(
     """
     import mediapipe as mp
 
-    # [R17] Reuse caller-provided FaceMesh; only create+close if not provided
+    # Use solutions.face_mesh (legacy but still present in 0.10.x for static use).
+    # face_mesh parameter kept for API compat — if None, create a temporary one.
     _owns_fm = face_mesh is None
     if _owns_fm:
-        mp_fm    = mp.solutions.face_mesh
-        face_mesh = mp_fm.FaceMesh(
+        face_mesh = mp.solutions.face_mesh.FaceMesh(
             static_image_mode=True, max_num_faces=1,
             refine_landmarks=True, min_detection_confidence=0.5,
         )
 
     try:
         def _landmarks(bgr: np.ndarray):
-            r = face_mesh.process(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-            return r.multi_face_landmarks[0].landmark if r.multi_face_landmarks else None
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            r   = face_mesh.process(rgb)
+            if r.multi_face_landmarks:
+                return r.multi_face_landmarks[0].landmark
+            return None
 
         lm_gen = _landmarks(generated_bgr)
         lm_ref = _landmarks(reference_bgr)

@@ -1,16 +1,30 @@
-# ─────────────────────────────────────
-#  MAKEUP AI - Phase 1 Requirements
-#  Install with: pip install -r requirements.txt
-# ─────────────────────────────────────
+# Makeup AI — Full Stack Requirements
+# pip install -r requirements.txt
 
+# Core vision
 mediapipe==0.10.9
-opencv-python==4.9.0.80
+opencv-python-headless==4.9.0.80
 numpy==1.26.4
-africanwhisper
-flask
-mediapipe
-numpy
-opencv-python-headless
-pytest
-torch
-torchvision
+
+# Deep learning
+torch>=2.1.0
+torchvision>=0.16.0
+
+# Web backend
+flask>=3.0.0
+
+# Data download
+gdown>=5.1.0
+
+# ONNX (optional — export/inference)
+onnx>=1.15.0
+onnxruntime>=1.17.0
+
+# Testing
+pytest>=8.0.0
+
+# Training utilities
+tensorboard>=2.14.0
+
+# Optional: ONNX simplifier
+# onnxsim>=0.4.33

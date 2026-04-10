@@ -210,24 +210,25 @@ class ConsistentAugment:
             cropped = tuple(TF.hflip(img) for img in cropped)
 
         # 4. ColorJitter — derive params from self._jitter (no re-allocation) [R12, R19]
+        # ColorJitter.get_params() API: torchvision >=0.13 takes only the
+        # ColorJitter instance (not individual range tuples). We seed the
+        # global RNG so all images in the triplet get the same jitter params.
         torch.manual_seed(seed + 1)
-        fn = self._jitter.get_params(
-            self._jitter.brightness, self._jitter.contrast,
-            self._jitter.saturation, self._jitter.hue,
+        fn = T.ColorJitter.get_params(
+            self._jitter.brightness,
+            self._jitter.contrast,
+            self._jitter.saturation,
+            self._jitter.hue,
         )
-        jittered = tuple(
-            T.functional.adjust_brightness(
-                T.functional.adjust_contrast(
-                    T.functional.adjust_saturation(
-                        T.functional.adjust_hue(img, fn[3]),
-                        fn[2]
-                    ),
-                    fn[1]
-                ),
-                fn[0]
-            )
-            for img in cropped
-        )
+        # fn is (brightness, contrast, saturation, hue) float tuple
+        # Apply identical jitter to every image in the triplet
+        def _apply_jitter(img):
+            img = TF.adjust_brightness(img, fn[0])
+            img = TF.adjust_contrast(img, fn[1])
+            img = TF.adjust_saturation(img, fn[2])
+            img = TF.adjust_hue(img, fn[3])
+            return img
+        jittered = tuple(_apply_jitter(img) for img in cropped)
         return jittered
 
 
