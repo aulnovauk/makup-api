@@ -876,6 +876,7 @@ async function startCamera() {
 function stopCamera() {
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
   cancelAnimationFrame(animFrame);
+  lastMakeupImg = null;
   document.getElementById('startBtn').style.display    = 'flex';
   document.getElementById('stopBtn').style.display     = 'none';
   document.getElementById('screenshotBtn').style.display = 'none';
@@ -886,6 +887,16 @@ function stopCamera() {
 // ════════════════════════════════════════════════════════
 //  PROCESSING LOOP
 // ════════════════════════════════════════════════════════
+let sendCanvas = null;
+let lastMakeupImg = null;
+
+function getSmallCanvas() {
+  if (!sendCanvas) {
+    sendCanvas = document.createElement('canvas');
+  }
+  return sendCanvas;
+}
+
 async function processLoop(ts) {
   const vid = document.getElementById('videoEl');
   if (!vid.videoWidth || !stream) return;
@@ -895,21 +906,54 @@ async function processLoop(ts) {
   canvas.width  = vid.videoWidth;
   canvas.height = vid.videoHeight;
 
-  // Draw raw video frame
+  // Draw raw video frame (always shown smoothly)
   ctx.save();
-  ctx.scale(-1, 1);   // mirror
+  ctx.scale(-1, 1);
   ctx.drawImage(vid, -canvas.width, 0, canvas.width, canvas.height);
   ctx.restore();
 
-  // Capture raw frame for BA toggle
+  // Overlay last makeup result if available
+  if (lastMakeupImg && !showBA) {
+    ctx.drawImage(lastMakeupImg, 0, 0, canvas.width, canvas.height);
+  } else if (lastMakeupImg && showBA) {
+    const splitX = Math.floor(canvas.width / 2);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(splitX, 0, canvas.width - splitX, canvas.height);
+    ctx.clip();
+    ctx.drawImage(lastMakeupImg, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(splitX, 0);
+    ctx.lineTo(splitX, canvas.height);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.font = '13px "DM Sans", sans-serif';
+    ctx.fillText('BEFORE', 14, 28);
+    ctx.fillText('AFTER',  splitX + 14, 28);
+  }
+
   lastRawFrame = canvas.toDataURL('image/jpeg', 0.7);
 
-  // Send to server for makeup processing (throttled — skip if still busy)
+  // Send to server (throttled — skip if still busy)
   if (!processing) {
     processing = true;
     document.getElementById('processingBadge').style.display = 'flex';
 
-    const imageData = canvas.toDataURL('image/jpeg', 0.75);
+    // Downscale frame before sending to speed up transfer + processing
+    const sc = getSmallCanvas();
+    const maxW = 480;
+    const scale = Math.min(1, maxW / vid.videoWidth);
+    sc.width  = Math.round(vid.videoWidth  * scale);
+    sc.height = Math.round(vid.videoHeight * scale);
+    const sctx = sc.getContext('2d');
+    sctx.save();
+    sctx.scale(-1, 1);
+    sctx.drawImage(vid, -sc.width, 0, sc.width, sc.height);
+    sctx.restore();
+    const imageData = sc.toDataURL('image/jpeg', 0.6);
 
     try {
       const resp = await fetch('/api/apply', {
@@ -923,41 +967,8 @@ async function processLoop(ts) {
 
         if (data.result) {
           lastResult = data.result;
-
-          // Draw result onto canvas
           const img = new Image();
-          img.onload = () => {
-            if (!showBA) {
-              ctx.drawImage(img, 0, 0);
-            } else if (lastRawFrame) {
-              // Split screen: left = raw, right = makeup
-              const splitX = Math.floor(canvas.width / 2);
-              const rawImg = new Image();
-              rawImg.onload = () => {
-                ctx.drawImage(rawImg, 0, 0);                  // full raw
-                ctx.save();
-                ctx.beginPath();
-                ctx.rect(splitX, 0, canvas.width - splitX, canvas.height);
-                ctx.clip();
-                ctx.drawImage(img, 0, 0);                     // makeup on right
-                ctx.restore();
-                // Divider
-                ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.moveTo(splitX, 0);
-                ctx.lineTo(splitX, canvas.height);
-                ctx.stroke();
-                // Labels
-                ctx.fillStyle = 'rgba(255,255,255,0.8)';
-                ctx.font = '13px "DM Sans", sans-serif';
-                ctx.fillText('BEFORE', 14, 28);
-                ctx.fillText('AFTER',  splitX + 14, 28);
-              };
-              rawImg.src = lastRawFrame;
-            }
-            img.src = '';   // help GC
-          };
+          img.onload = () => { lastMakeupImg = img; };
           img.src = data.result;
         }
 
