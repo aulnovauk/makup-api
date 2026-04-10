@@ -528,7 +528,6 @@ function startSSE() {
   sseSource.onopen = () => {
     sseConnected = true;
     document.getElementById('processingBadge').style.display = 'flex';
-    log.debug?.('SSE connected');
   };
 
   sseSource.onmessage = (evt) => {
