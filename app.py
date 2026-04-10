@@ -444,6 +444,14 @@ def _error(msg: str, code: int = 400):
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 
+@app.after_request
+def add_headers(response):
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
 try:
     ENGINE = WebMakeupEngine()
     WORKER = StreamWorker(ENGINE)
@@ -459,6 +467,11 @@ SCREENSHOT_DIR.mkdir(exist_ok=True)
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return Response(status=204)
 
 
 @app.route("/health")
