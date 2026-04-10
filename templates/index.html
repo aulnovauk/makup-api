@@ -6,9 +6,7 @@
 <title>Makeup AI — Real-time Virtual Try-On</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
-  /* ── Reset + Variables ─────────────────────────────── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
   :root {
     --bg:        #0d0d12;
     --surface:   #16161e;
@@ -22,464 +20,133 @@
     --radius-sm: 8px;
     --shadow:    0 8px 32px rgba(0,0,0,0.5);
   }
+  body { background:var(--bg); color:var(--text); font-family:'DM Sans',sans-serif; font-weight:300; min-height:100vh; overflow-x:hidden; }
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-weight: 300;
-    min-height: 100vh;
-    overflow-x: hidden;
-  }
+  header { display:flex; align-items:center; justify-content:space-between; padding:18px 32px; border-bottom:1px solid var(--border); background:rgba(13,13,18,0.95); backdrop-filter:blur(12px); position:sticky; top:0; z-index:100; }
+  .logo { display:flex; align-items:center; gap:10px; font-family:'Playfair Display',serif; font-size:22px; letter-spacing:0.02em; }
+  .logo-dot { width:10px; height:10px; background:var(--accent); border-radius:50%; animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.8)} }
+  .header-status { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted); }
+  .status-dot { width:7px; height:7px; border-radius:50%; background:#3fcf6a; }
+  .status-dot.offline { background:#cf3f3f; }
 
-  /* ── Header ────────────────────────────────────────── */
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 18px 32px;
-    border-bottom: 1px solid var(--border);
-    background: rgba(13,13,18,0.95);
-    backdrop-filter: blur(12px);
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-family: 'Playfair Display', serif;
-    font-size: 22px;
-    letter-spacing: 0.02em;
-  }
-  .logo-dot {
-    width: 10px; height: 10px;
-    background: var(--accent);
-    border-radius: 50%;
-    animation: pulse 2s ease-in-out infinite;
-  }
-  @keyframes pulse {
-    0%,100% { opacity: 1; transform: scale(1); }
-    50%      { opacity: 0.5; transform: scale(0.8); }
-  }
-  .header-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    color: var(--text-muted);
-  }
-  .status-dot {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: #3fcf6a;
-  }
-  .status-dot.offline { background: #cf3f3f; }
+  .layout { display:grid; grid-template-columns:1fr 320px; height:calc(100vh - 61px); overflow:hidden; }
+  .preview-panel { background:#080810; display:flex; flex-direction:column; position:relative; }
 
-  /* ── Layout ────────────────────────────────────────── */
-  .layout {
-    display: grid;
-    grid-template-columns: 1fr 320px;
-    gap: 0;
-    height: calc(100vh - 61px);
-    overflow: hidden;
-  }
+  .mode-tabs { display:flex; border-bottom:1px solid var(--border); }
+  .tab-btn { flex:1; padding:14px 0; background:none; border:none; border-bottom:2px solid transparent; color:var(--text-muted); font-family:'DM Sans',sans-serif; font-size:11px; font-weight:500; cursor:pointer; transition:all 0.2s; letter-spacing:0.04em; text-transform:uppercase; }
+  .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
 
-  /* ── Camera / Preview Panel ─────────────────────────── */
-  .preview-panel {
-    position: relative;
-    background: #080810;
-    display: flex;
-    flex-direction: column;
-  }
+  .preview-area { flex:1; position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+  #videoEl { display:none; }
+  #canvasEl { width:100%; height:100%; object-fit:cover; display:block; }
+  #photoImg { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:none; }
 
-  .mode-tabs {
-    display: flex;
-    gap: 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .tab-btn {
-    flex: 1;
-    padding: 14px 0;
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--text-muted);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    cursor: pointer;
-    transition: all 0.2s;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    font-size: 11px;
-    font-weight: 500;
-  }
-  .tab-btn.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-  }
+  .preview-placeholder { display:flex; flex-direction:column; align-items:center; gap:16px; color:var(--text-muted); }
+  .preview-placeholder svg { opacity:0.3; }
+  .preview-placeholder p { font-size:14px; }
 
-  .preview-area {
-    flex: 1;
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  #videoEl, #canvasEl {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: none;
-  }
-  #photoImg {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    display: none;
-  }
-  #canvasEl { display: block; }
-
-  .preview-placeholder {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-    color: var(--text-muted);
-  }
-  .preview-placeholder svg { opacity: 0.3; }
-  .preview-placeholder p { font-size: 14px; }
-
-  /* FPS badge */
+  /* ── Overlay badges ── */
   .fps-badge {
-    position: absolute;
-    top: 14px;
-    left: 14px;
-    background: rgba(0,0,0,0.7);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 500;
-    color: #3fcf6a;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.05em;
-    display: none;
+    position:absolute; top:14px; left:14px;
+    background:rgba(0,0,0,0.7); border:1px solid var(--border);
+    border-radius:6px; padding:4px 10px; font-size:11px; font-weight:500;
+    color:#3fcf6a; font-variant-numeric:tabular-nums; letter-spacing:0.05em; display:none;
   }
+  .latency-badge {
+    position:absolute; top:14px; left:90px;
+    background:rgba(0,0,0,0.7); border:1px solid var(--border);
+    border-radius:6px; padding:4px 10px; font-size:11px;
+    color:var(--text-muted); font-variant-numeric:tabular-nums; display:none;
+  }
+  .latency-badge.slow { color:#f4a261; }
+  .latency-badge.bad  { color:#e07070; }
 
-  /* Processing spinner */
   .processing-badge {
-    position: absolute;
-    top: 14px;
-    right: 14px;
-    background: rgba(201, 126, 178, 0.15);
-    border: 1px solid rgba(201, 126, 178, 0.3);
-    border-radius: 6px;
-    padding: 4px 12px;
-    font-size: 11px;
-    color: var(--accent);
-    display: none;
-    align-items: center;
-    gap: 6px;
+    position:absolute; top:14px; right:14px;
+    background:rgba(201,126,178,0.15); border:1px solid rgba(201,126,178,0.3);
+    border-radius:6px; padding:4px 12px; font-size:11px; color:var(--accent);
+    display:none; align-items:center; gap:6px;
   }
-  .spinner {
-    width: 10px; height: 10px;
-    border: 1.5px solid rgba(201,126,178,0.3);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width:10px; height:10px; border:1.5px solid rgba(201,126,178,0.3); border-top-color:var(--accent); border-radius:50%; animation:spin 0.7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
 
-  /* Camera controls bar */
-  .controls-bar {
-    padding: 14px 20px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: var(--surface);
-  }
+  .controls-bar { padding:14px 20px; border-top:1px solid var(--border); display:flex; align-items:center; gap:10px; background:var(--surface); }
+  .btn { display:flex; align-items:center; gap:7px; padding:9px 18px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--surface2); color:var(--text); font-family:'DM Sans',sans-serif; font-size:13px; cursor:pointer; transition:all 0.2s; white-space:nowrap; }
+  .btn:hover { background:rgba(255,255,255,0.07); border-color:rgba(255,255,255,0.15); }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:500; }
+  .btn.primary:hover { filter:brightness(1.1); }
+  .btn.danger { background:rgba(207,63,63,0.15); border-color:rgba(207,63,63,0.4); color:#e07070; }
+  .btn.danger:hover { background:rgba(207,63,63,0.25); }
+  .btn svg { flex-shrink:0; }
+  .btn-spacer { flex:1; }
+  #photoUploadInput { display:none; }
 
-  .btn {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 9px 18px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--surface2);
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 13px;
-    font-weight: 400;
-    cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
-  }
-  .btn:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.15); }
-  .btn.primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-    font-weight: 500;
-  }
-  .btn.primary:hover { filter: brightness(1.1); }
-  .btn.danger {
-    background: rgba(207, 63, 63, 0.15);
-    border-color: rgba(207, 63, 63, 0.4);
-    color: #e07070;
-  }
-  .btn.danger:hover { background: rgba(207, 63, 63, 0.25); }
-  .btn svg { flex-shrink: 0; }
+  /* ── Controls panel ── */
+  .controls-panel { background:var(--surface); border-left:1px solid var(--border); overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+  .controls-panel::-webkit-scrollbar { width:4px; }
+  .controls-panel::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
 
-  .btn-spacer { flex: 1; }
+  .looks-section { padding:18px 18px 18px; border-bottom:1px solid var(--border); }
+  .section-title { font-size:10px; font-weight:500; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-muted); margin-bottom:12px; }
+  .looks-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+  .look-btn { padding:10px 0; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--surface2); color:var(--text); font-family:'DM Sans',sans-serif; font-size:12px; cursor:pointer; transition:all 0.18s; text-align:center; }
+  .look-btn:hover { border-color:var(--accent); color:var(--accent); }
+  .look-btn.active { background:rgba(201,126,178,0.12); border-color:var(--accent); color:var(--accent); }
 
-  #photoUploadInput { display: none; }
+  .layer-section { border-bottom:1px solid var(--border); overflow:hidden; }
+  .layer-header { display:flex; align-items:center; padding:14px 18px; cursor:pointer; gap:10px; user-select:none; }
+  .layer-header:hover { background:rgba(255,255,255,0.03); }
+  .toggle { position:relative; width:34px; height:18px; flex-shrink:0; }
+  .toggle input { opacity:0; width:0; height:0; }
+  .toggle-track { position:absolute; inset:0; background:var(--surface2); border:1px solid var(--border); border-radius:9px; transition:background 0.2s; cursor:pointer; }
+  .toggle input:checked ~ .toggle-track { background:var(--accent); border-color:var(--accent); }
+  .toggle-thumb { position:absolute; top:2px; left:2px; width:12px; height:12px; background:#fff; border-radius:50%; transition:transform 0.2s; pointer-events:none; }
+  .toggle input:checked ~ .toggle-track .toggle-thumb { transform:translateX(16px); }
+  .layer-name { flex:1; font-size:13px; }
+  .layer-chevron { color:var(--text-muted); transition:transform 0.2s; flex-shrink:0; }
+  .layer-section.open .layer-chevron { transform:rotate(180deg); }
+  .layer-body { display:none; padding:4px 18px 16px; flex-direction:column; gap:12px; }
+  .layer-section.open .layer-body { display:flex; }
 
-  /* ── Controls Panel (right sidebar) ─────────────────── */
-  .controls-panel {
-    background: var(--surface);
-    border-left: 1px solid var(--border);
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-  }
-  .controls-panel::-webkit-scrollbar { width: 4px; }
-  .controls-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .swatches { display:flex; flex-wrap:wrap; gap:8px; }
+  .swatch { width:28px; height:28px; border-radius:50%; border:2px solid transparent; cursor:pointer; transition:transform 0.15s, border-color 0.15s; flex-shrink:0; }
+  .swatch:hover { transform:scale(1.15); }
+  .swatch.active { border-color:#fff; transform:scale(1.1); }
 
-  /* Preset looks */
-  .looks-section {
-    padding: 18px 18px 0;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 18px;
-  }
-  .section-title {
-    font-size: 10px;
-    font-weight: 500;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    margin-bottom: 12px;
-  }
-  .looks-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
-  }
-  .look-btn {
-    padding: 10px 0;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--surface2);
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 12px;
-    font-weight: 400;
-    cursor: pointer;
-    transition: all 0.18s;
-    text-align: center;
-  }
-  .look-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .look-btn.active {
-    background: rgba(201,126,178,0.12);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
+  .slider-row { display:flex; align-items:center; gap:10px; }
+  .slider-label { font-size:11px; color:var(--text-muted); min-width:52px; letter-spacing:0.03em; }
+  .slider-val { font-size:11px; color:var(--text-muted); min-width:30px; text-align:right; font-variant-numeric:tabular-nums; }
+  input[type=range] { flex:1; height:3px; -webkit-appearance:none; background:var(--surface2); border-radius:2px; outline:none; cursor:pointer; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--accent); cursor:pointer; transition:transform 0.15s; }
+  input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.2); }
 
-  /* Layer sections */
-  .layer-section {
-    border-bottom: 1px solid var(--border);
-    overflow: hidden;
-  }
-  .layer-header {
-    display: flex;
-    align-items: center;
-    padding: 14px 18px;
-    cursor: pointer;
-    gap: 10px;
-    user-select: none;
-  }
-  .layer-header:hover { background: rgba(255,255,255,0.03); }
+  .ba-section { padding:14px 18px; border-bottom:1px solid var(--border); }
+  .ba-row { display:flex; align-items:center; justify-content:space-between; }
+  .ba-label { font-size:11px; color:var(--text-muted); letter-spacing:0.08em; text-transform:uppercase; }
 
-  .toggle {
-    position: relative;
-    width: 34px; height: 18px;
-    flex-shrink: 0;
-  }
-  .toggle input { opacity: 0; width: 0; height: 0; }
-  .toggle-track {
-    position: absolute;
-    inset: 0;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    transition: background 0.2s;
-    cursor: pointer;
-  }
-  .toggle input:checked ~ .toggle-track {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .toggle-thumb {
-    position: absolute;
-    top: 2px; left: 2px;
-    width: 12px; height: 12px;
-    background: #fff;
-    border-radius: 50%;
-    transition: transform 0.2s;
-    pointer-events: none;
-  }
-  .toggle input:checked ~ .toggle-track .toggle-thumb {
-    transform: translateX(16px);
-  }
+  #toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(80px); background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:10px 20px; border-radius:var(--radius-sm); font-size:13px; transition:transform 0.3s ease; z-index:999; white-space:nowrap; pointer-events:none; }
+  #toast.show { transform:translateX(-50%) translateY(0); }
 
-  .layer-name {
-    flex: 1;
-    font-size: 13px;
-    font-weight: 400;
-    letter-spacing: 0.01em;
-  }
-  .layer-chevron {
-    color: var(--text-muted);
-    transition: transform 0.2s;
-    flex-shrink: 0;
-  }
-  .layer-section.open .layer-chevron { transform: rotate(180deg); }
-
-  .layer-body {
-    display: none;
-    padding: 4px 18px 16px;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .layer-section.open .layer-body { display: flex; }
-
-  /* Color swatches */
-  .swatches {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .swatch {
-    width: 28px; height: 28px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    cursor: pointer;
-    transition: transform 0.15s, border-color 0.15s;
-    flex-shrink: 0;
-  }
-  .swatch:hover { transform: scale(1.15); }
-  .swatch.active { border-color: #fff; transform: scale(1.1); }
-
-  /* Opacity slider */
-  .slider-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .slider-label {
-    font-size: 11px;
-    color: var(--text-muted);
-    min-width: 52px;
-    letter-spacing: 0.03em;
-  }
-  .slider-val {
-    font-size: 11px;
-    color: var(--text-muted);
-    min-width: 30px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  input[type=range] {
-    flex: 1;
-    height: 3px;
-    -webkit-appearance: none;
-    background: var(--surface2);
-    border-radius: 2px;
-    outline: none;
-    cursor: pointer;
-  }
-  input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 14px; height: 14px;
-    border-radius: 50%;
-    background: var(--accent);
-    cursor: pointer;
-    transition: transform 0.15s;
-  }
-  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
-
-  /* ── Before/After toggle ─────────────────────────────── */
-  .ba-section {
-    padding: 14px 18px;
-    border-bottom: 1px solid var(--border);
-  }
-  .ba-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .ba-label {
-    font-size: 11px;
-    color: var(--text-muted);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  /* ── Notification toast ──────────────────────────────── */
-  #toast {
-    position: fixed;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%) translateY(80px);
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 10px 20px;
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    transition: transform 0.3s ease;
-    z-index: 999;
-    white-space: nowrap;
-    pointer-events: none;
-  }
-  #toast.show { transform: translateX(-50%) translateY(0); }
-
-  /* ── Responsive ──────────────────────────────────────── */
-  @media (max-width: 800px) {
-    .layout { grid-template-columns: 1fr; height: auto; overflow: visible; }
-    .controls-panel { border-left: none; border-top: 1px solid var(--border); max-height: 60vh; }
-    .preview-panel { height: 50vh; }
+  @media (max-width:800px) {
+    .layout { grid-template-columns:1fr; height:auto; overflow:visible; }
+    .controls-panel { border-left:none; border-top:1px solid var(--border); max-height:60vh; }
+    .preview-panel { height:50vh; }
   }
 </style>
 </head>
 <body>
 
-<!-- ── Header ──────────────────────────────────────────── -->
 <header>
-  <div class="logo">
-    <div class="logo-dot"></div>
-    Makeup AI
-  </div>
+  <div class="logo"><div class="logo-dot"></div>Makeup AI</div>
   <div class="header-status">
     <div class="status-dot" id="engineStatus"></div>
     <span id="engineLabel">Checking...</span>
   </div>
 </header>
 
-<!-- ── Main layout ─────────────────────────────────────── -->
 <div class="layout">
-
-  <!-- Left: Preview -->
   <div class="preview-panel">
-
     <div class="mode-tabs">
       <button class="tab-btn active" onclick="switchMode('camera')" id="tabCamera">Live Camera</button>
       <button class="tab-btn" onclick="switchMode('photo')" id="tabPhoto">Photo Upload</button>
@@ -497,15 +164,14 @@
         <p>Start camera or upload a photo</p>
       </div>
 
-      <div class="fps-badge" id="fpsBadge">0 fps</div>
+      <div class="fps-badge"     id="fpsBadge">0 fps</div>
+      <div class="latency-badge" id="latencyBadge">-- ms</div>
       <div class="processing-badge" id="processingBadge">
-        <div class="spinner"></div>
-        Processing
+        <div class="spinner"></div>Processing
       </div>
     </div>
 
     <div class="controls-bar">
-      <!-- Camera mode buttons -->
       <div id="cameraControls" style="display:flex;gap:10px;width:100%;align-items:center">
         <button class="btn primary" id="startBtn" onclick="startCamera()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -521,8 +187,6 @@
           Screenshot
         </button>
       </div>
-
-      <!-- Photo mode buttons -->
       <div id="photoControls" style="display:none;gap:10px;width:100%;align-items:center">
         <button class="btn primary" onclick="document.getElementById('photoUploadInput').click()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -538,10 +202,7 @@
     </div>
   </div>
 
-  <!-- Right: Controls -->
   <div class="controls-panel">
-
-    <!-- Preset looks -->
     <div class="looks-section">
       <div class="section-title">Looks</div>
       <div class="looks-grid">
@@ -552,7 +213,6 @@
       </div>
     </div>
 
-    <!-- Before/After toggle -->
     <div class="ba-section">
       <div class="ba-row">
         <span class="ba-label">Before / After</span>
@@ -563,179 +223,108 @@
       </div>
     </div>
 
-    <!-- Lipstick layer -->
+    <!-- Lipstick -->
     <div class="layer-section open" id="layerLipstick">
       <div class="layer-header" onclick="toggleLayer('Lipstick')">
-        <label class="toggle" onclick="event.stopPropagation()">
-          <input type="checkbox" id="togLipstick" checked onchange="updateParam('lipstick','enabled',this.checked)">
-          <div class="toggle-track"><div class="toggle-thumb"></div></div>
-        </label>
+        <label class="toggle" onclick="event.stopPropagation()"><input type="checkbox" id="togLipstick" checked onchange="updateParam('lipstick','enabled',this.checked)"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
         <span class="layer-name">Lipstick</span>
         <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="layer-body">
         <div class="swatches" id="swatchesLipstick"></div>
-        <div class="slider-row">
-          <span class="slider-label">Opacity</span>
-          <input type="range" min="5" max="95" value="45"
-                 oninput="updateParam('lipstick','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
-          <span class="slider-val">45%</span>
-        </div>
+        <div class="slider-row"><span class="slider-label">Opacity</span><input type="range" min="5" max="95" value="45" oninput="updateParam('lipstick','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'"><span class="slider-val">45%</span></div>
       </div>
     </div>
 
-    <!-- Lip Liner layer -->
+    <!-- Lip Liner -->
     <div class="layer-section" id="layerLipLiner">
       <div class="layer-header" onclick="toggleLayer('LipLiner')">
-        <label class="toggle" onclick="event.stopPropagation()">
-          <input type="checkbox" id="togLipLiner" onchange="updateParam('lip_liner','enabled',this.checked)">
-          <div class="toggle-track"><div class="toggle-thumb"></div></div>
-        </label>
+        <label class="toggle" onclick="event.stopPropagation()"><input type="checkbox" id="togLipLiner" onchange="updateParam('lip_liner','enabled',this.checked)"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
         <span class="layer-name">Lip Liner</span>
         <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="layer-body">
-        <div class="slider-row">
-          <span class="slider-label">Intensity</span>
-          <input type="range" min="5" max="95" value="60"
-                 oninput="updateParam('lip_liner','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
-          <span class="slider-val">60%</span>
-        </div>
+        <div class="slider-row"><span class="slider-label">Intensity</span><input type="range" min="5" max="95" value="60" oninput="updateParam('lip_liner','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'"><span class="slider-val">60%</span></div>
       </div>
     </div>
 
-    <!-- Eyeshadow layer -->
+    <!-- Eyeshadow -->
     <div class="layer-section" id="layerEyeshadow">
       <div class="layer-header" onclick="toggleLayer('Eyeshadow')">
-        <label class="toggle" onclick="event.stopPropagation()">
-          <input type="checkbox" id="togEyeshadow" onchange="updateParam('eyeshadow','enabled',this.checked)">
-          <div class="toggle-track"><div class="toggle-thumb"></div></div>
-        </label>
+        <label class="toggle" onclick="event.stopPropagation()"><input type="checkbox" id="togEyeshadow" onchange="updateParam('eyeshadow','enabled',this.checked)"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
         <span class="layer-name">Eyeshadow</span>
         <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="layer-body">
         <div class="swatches" id="swatchesEyeshadow"></div>
-        <div class="slider-row">
-          <span class="slider-label">Opacity</span>
-          <input type="range" min="5" max="90" value="30"
-                 oninput="updateParam('eyeshadow','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
-          <span class="slider-val">30%</span>
-        </div>
+        <div class="slider-row"><span class="slider-label">Opacity</span><input type="range" min="5" max="90" value="30" oninput="updateParam('eyeshadow','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'"><span class="slider-val">30%</span></div>
       </div>
     </div>
 
-    <!-- Eyebrow layer -->
+    <!-- Eyebrow -->
     <div class="layer-section" id="layerEyebrow">
       <div class="layer-header" onclick="toggleLayer('Eyebrow')">
-        <label class="toggle" onclick="event.stopPropagation()">
-          <input type="checkbox" id="togEyebrow" onchange="updateParam('eyebrow','enabled',this.checked)">
-          <div class="toggle-track"><div class="toggle-thumb"></div></div>
-        </label>
+        <label class="toggle" onclick="event.stopPropagation()"><input type="checkbox" id="togEyebrow" onchange="updateParam('eyebrow','enabled',this.checked)"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
         <span class="layer-name">Eyebrow Fill</span>
         <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="layer-body">
         <div class="swatches" id="swatchesEyebrow"></div>
-        <div class="slider-row">
-          <span class="slider-label">Opacity</span>
-          <input type="range" min="10" max="80" value="45"
-                 oninput="updateParam('eyebrow','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
-          <span class="slider-val">45%</span>
-        </div>
+        <div class="slider-row"><span class="slider-label">Opacity</span><input type="range" min="10" max="80" value="45" oninput="updateParam('eyebrow','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'"><span class="slider-val">45%</span></div>
       </div>
     </div>
 
-    <!-- Blush layer -->
+    <!-- Blush -->
     <div class="layer-section" id="layerBlush">
       <div class="layer-header" onclick="toggleLayer('Blush')">
-        <label class="toggle" onclick="event.stopPropagation()">
-          <input type="checkbox" id="togBlush" onchange="updateParam('blush','enabled',this.checked)">
-          <div class="toggle-track"><div class="toggle-thumb"></div></div>
-        </label>
+        <label class="toggle" onclick="event.stopPropagation()"><input type="checkbox" id="togBlush" onchange="updateParam('blush','enabled',this.checked)"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
         <span class="layer-name">Blush</span>
         <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="layer-body">
         <div class="swatches" id="swatchesBlush"></div>
-        <div class="slider-row">
-          <span class="slider-label">Opacity</span>
-          <input type="range" min="5" max="60" value="20"
-                 oninput="updateParam('blush','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
-          <span class="slider-val">20%</span>
-        </div>
+        <div class="slider-row"><span class="slider-label">Opacity</span><input type="range" min="5" max="60" value="20" oninput="updateParam('blush','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'"><span class="slider-val">20%</span></div>
       </div>
     </div>
 
-    <!-- Highlighter layer -->
+    <!-- Highlighter -->
     <div class="layer-section" id="layerHighlighter">
       <div class="layer-header" onclick="toggleLayer('Highlighter')">
-        <label class="toggle" onclick="event.stopPropagation()">
-          <input type="checkbox" id="togHighlighter" onchange="updateParam('highlighter','enabled',this.checked)">
-          <div class="toggle-track"><div class="toggle-thumb"></div></div>
-        </label>
+        <label class="toggle" onclick="event.stopPropagation()"><input type="checkbox" id="togHighlighter" onchange="updateParam('highlighter','enabled',this.checked)"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
         <span class="layer-name">Highlighter</span>
         <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="layer-body">
-        <div class="slider-row">
-          <span class="slider-label">Intensity</span>
-          <input type="range" min="5" max="60" value="25"
-                 oninput="updateParam('highlighter','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
-          <span class="slider-val">25%</span>
-        </div>
+        <div class="slider-row"><span class="slider-label">Intensity</span><input type="range" min="5" max="60" value="25" oninput="updateParam('highlighter','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'"><span class="slider-val">25%</span></div>
       </div>
     </div>
 
-    <!-- Contour layer -->
+    <!-- Contour -->
     <div class="layer-section" id="layerContour">
       <div class="layer-header" onclick="toggleLayer('Contour')">
-        <label class="toggle" onclick="event.stopPropagation()">
-          <input type="checkbox" id="togContour" onchange="updateParam('contour','enabled',this.checked)">
-          <div class="toggle-track"><div class="toggle-thumb"></div></div>
-        </label>
+        <label class="toggle" onclick="event.stopPropagation()"><input type="checkbox" id="togContour" onchange="updateParam('contour','enabled',this.checked)"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
         <span class="layer-name">Contour</span>
         <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="layer-body">
-        <div class="slider-row">
-          <span class="slider-label">Intensity</span>
-          <input type="range" min="5" max="60" value="20"
-                 oninput="updateParam('contour','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
-          <span class="slider-val">20%</span>
-        </div>
+        <div class="slider-row"><span class="slider-label">Intensity</span><input type="range" min="5" max="60" value="20" oninput="updateParam('contour','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'"><span class="slider-val">20%</span></div>
       </div>
     </div>
 
-    <!-- Foundation layer -->
+    <!-- Foundation -->
     <div class="layer-section" id="layerFoundation">
       <div class="layer-header" onclick="toggleLayer('Foundation')">
-        <label class="toggle" onclick="event.stopPropagation()">
-          <input type="checkbox" id="togFoundation" onchange="updateParam('foundation','enabled',this.checked)">
-          <div class="toggle-track"><div class="toggle-thumb"></div></div>
-        </label>
+        <label class="toggle" onclick="event.stopPropagation()"><input type="checkbox" id="togFoundation" onchange="updateParam('foundation','enabled',this.checked)"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
         <span class="layer-name">Foundation</span>
         <svg class="layer-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="layer-body">
-        <div class="slider-row">
-          <span class="slider-label">Coverage</span>
-          <input type="range" min="5" max="40" value="12"
-                 oninput="updateParam('foundation','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'">
-          <span class="slider-val">12%</span>
-        </div>
-        <div class="slider-row">
-          <span class="slider-label">Smooth</span>
-          <label class="toggle" style="margin-left:auto">
-            <input type="checkbox" id="togSmooth" checked onchange="updateParam('foundation','smooth',this.checked)">
-            <div class="toggle-track"><div class="toggle-thumb"></div></div>
-          </label>
-        </div>
+        <div class="slider-row"><span class="slider-label">Coverage</span><input type="range" min="5" max="40" value="12" oninput="updateParam('foundation','opacity',this.value/100);this.nextElementSibling.textContent=this.value+'%'"><span class="slider-val">12%</span></div>
+        <div class="slider-row"><span class="slider-label">Smooth</span><label class="toggle" style="margin-left:auto"><input type="checkbox" id="togSmooth" checked onchange="updateParam('foundation','smooth',this.checked)"><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div>
       </div>
     </div>
-
-  </div><!-- end controls-panel -->
-</div><!-- end layout -->
+  </div>
+</div>
 
 <div id="toast"></div>
 
@@ -744,102 +333,247 @@
 //  STATE
 // ════════════════════════════════════════════════════════
 const state = {
-  lipstick:    { enabled: true,  opacity: 0.45, color: [30,20,200] },
-  lip_liner:   { enabled: false, opacity: 0.60, color: [30,20,200] },
-  eyeshadow:   { enabled: false, opacity: 0.30, color: [40,60,100] },
-  eyebrow:     { enabled: false, opacity: 0.45, color: [30,45,80]  },
-  blush:       { enabled: false, opacity: 0.20, color: [140,130,230]},
-  highlighter: { enabled: false, opacity: 0.25 },
-  contour:     { enabled: false, opacity: 0.20 },
-  foundation:  { enabled: false, opacity: 0.12, smooth: true },
+  lipstick:    { enabled:true,  opacity:0.45, color:[30,20,200]   },
+  lip_liner:   { enabled:false, opacity:0.60, color:[30,20,200]   },
+  eyeshadow:   { enabled:false, opacity:0.30, color:[40,60,100]   },
+  eyebrow:     { enabled:false, opacity:0.45, color:[30,45,80]    },
+  blush:       { enabled:false, opacity:0.20, color:[140,130,230] },
+  highlighter: { enabled:false, opacity:0.25 },
+  contour:     { enabled:false, opacity:0.20 },
+  foundation:  { enabled:false, opacity:0.12, smooth:true },
 };
 
 const PRESETS = {
-  lipstick: {
-    red_rose:     { bgr:[30,20,200],   hex:'#c81428', label:'Red Rose' },
-    pink_blush:   { bgr:[150,100,220], hex:'#dc6496', label:'Pink' },
-    coral_sunset: { bgr:[80,100,240],  hex:'#f06450', label:'Coral' },
-    berry_wine:   { bgr:[60,20,130],   hex:'#821432', label:'Berry' },
-    nude_beige:   { bgr:[130,150,190], hex:'#be9682', label:'Nude' },
-    deep_plum:    { bgr:[80,30,100],   hex:'#641e50', label:'Plum' },
-  },
-  eyeshadow: {
-    smoky_brown:  { bgr:[40,60,100],   hex:'#643c28', label:'Smoky' },
-    rose_gold:    { bgr:[100,120,200], hex:'#c87864', label:'Rose Gold' },
-    ocean_blue:   { bgr:[180,100,50],  hex:'#3264b4', label:'Blue' },
-    forest_green: { bgr:[60,130,60],   hex:'#3c823c', label:'Green' },
-    purple_haze:  { bgr:[150,60,130],  hex:'#823c96', label:'Purple' },
-  },
-  eyebrow: {
-    dark_brown:   { bgr:[30,45,80],    hex:'#502d1e', label:'Dark Brown' },
-    taupe:        { bgr:[90,100,130],  hex:'#82645a', label:'Taupe' },
-    black:        { bgr:[15,15,15],    hex:'#0f0f0f', label:'Black' },
-    auburn:       { bgr:[40,60,130],   hex:'#823c28', label:'Auburn' },
-  },
-  blush: {
-    soft_rose:    { bgr:[140,130,230], hex:'#e6828c', label:'Soft Rose' },
-    peach:        { bgr:[110,160,240], hex:'#f0a06e', label:'Peach' },
-    berry:        { bgr:[100,80,180],  hex:'#b45064', label:'Berry' },
-    bronze:       { bgr:[80,110,170],  hex:'#aa6e50', label:'Bronze' },
-  },
+  lipstick:  { red_rose:{bgr:[30,20,200],hex:'#c81428',label:'Red Rose'}, pink_blush:{bgr:[150,100,220],hex:'#dc6496',label:'Pink'}, coral_sunset:{bgr:[80,100,240],hex:'#f06450',label:'Coral'}, berry_wine:{bgr:[60,20,130],hex:'#821432',label:'Berry'}, nude_beige:{bgr:[130,150,190],hex:'#be9682',label:'Nude'}, deep_plum:{bgr:[80,30,100],hex:'#641e50',label:'Plum'} },
+  eyeshadow: { smoky_brown:{bgr:[40,60,100],hex:'#643c28',label:'Smoky'}, rose_gold:{bgr:[100,120,200],hex:'#c87864',label:'Rose Gold'}, ocean_blue:{bgr:[180,100,50],hex:'#3264b4',label:'Blue'}, forest_green:{bgr:[60,130,60],hex:'#3c823c',label:'Green'}, purple_haze:{bgr:[150,60,130],hex:'#823c96',label:'Purple'} },
+  eyebrow:   { dark_brown:{bgr:[30,45,80],hex:'#502d1e',label:'Dark Brown'}, taupe:{bgr:[90,100,130],hex:'#82645a',label:'Taupe'}, black:{bgr:[15,15,15],hex:'#0f0f0f',label:'Black'}, auburn:{bgr:[40,60,130],hex:'#823c28',label:'Auburn'} },
+  blush:     { soft_rose:{bgr:[140,130,230],hex:'#e6828c',label:'Soft Rose'}, peach:{bgr:[110,160,240],hex:'#f0a06e',label:'Peach'}, berry:{bgr:[100,80,180],hex:'#b45064',label:'Berry'}, bronze:{bgr:[80,110,170],hex:'#aa6e50',label:'Bronze'} },
 };
 
 const LOOKS = {
-  natural: {
-    lipstick:    { enabled:true,  opacity:0.30, color:[130,150,190] },
-    lip_liner:   { enabled:false, opacity:0.20, color:[130,150,190] },
-    eyeshadow:   { enabled:false, opacity:0.15, color:[40,60,100]  },
-    eyebrow:     { enabled:true,  opacity:0.35, color:[90,100,130] },
-    blush:       { enabled:true,  opacity:0.15, color:[140,130,230]},
-    highlighter: { enabled:true,  opacity:0.20 },
-    contour:     { enabled:false, opacity:0.10 },
-    foundation:  { enabled:true,  opacity:0.12, smooth:true },
-  },
-  glam: {
-    lipstick:    { enabled:true,  opacity:0.65, color:[30,20,200]  },
-    lip_liner:   { enabled:true,  opacity:0.60, color:[30,20,200]  },
-    eyeshadow:   { enabled:true,  opacity:0.50, color:[40,60,100]  },
-    eyebrow:     { enabled:true,  opacity:0.60, color:[15,15,15]   },
-    blush:       { enabled:true,  opacity:0.30, color:[100,80,180] },
-    highlighter: { enabled:true,  opacity:0.45 },
-    contour:     { enabled:true,  opacity:0.35 },
-    foundation:  { enabled:true,  opacity:0.22, smooth:true },
-  },
-  smoky: {
-    lipstick:    { enabled:true,  opacity:0.55, color:[60,20,130]  },
-    lip_liner:   { enabled:true,  opacity:0.50, color:[60,20,130]  },
-    eyeshadow:   { enabled:true,  opacity:0.65, color:[40,60,100]  },
-    eyebrow:     { enabled:true,  opacity:0.55, color:[30,45,80]   },
-    blush:       { enabled:true,  opacity:0.25, color:[80,110,170] },
-    highlighter: { enabled:true,  opacity:0.30 },
-    contour:     { enabled:true,  opacity:0.40 },
-    foundation:  { enabled:true,  opacity:0.18, smooth:true },
-  },
-  fresh: {
-    lipstick:    { enabled:true,  opacity:0.35, color:[80,100,240] },
-    lip_liner:   { enabled:false, opacity:0.25, color:[80,100,240] },
-    eyeshadow:   { enabled:true,  opacity:0.20, color:[100,120,200]},
-    eyebrow:     { enabled:true,  opacity:0.40, color:[90,100,130] },
-    blush:       { enabled:true,  opacity:0.25, color:[110,160,240]},
-    highlighter: { enabled:true,  opacity:0.35 },
-    contour:     { enabled:false, opacity:0.10 },
-    foundation:  { enabled:true,  opacity:0.12, smooth:true },
-  },
+  natural: { lipstick:{enabled:true,opacity:0.30,color:[130,150,190]}, lip_liner:{enabled:false,opacity:0.20,color:[130,150,190]}, eyeshadow:{enabled:false,opacity:0.15,color:[40,60,100]}, eyebrow:{enabled:true,opacity:0.35,color:[90,100,130]}, blush:{enabled:true,opacity:0.15,color:[140,130,230]}, highlighter:{enabled:true,opacity:0.20}, contour:{enabled:false,opacity:0.10}, foundation:{enabled:true,opacity:0.12,smooth:true} },
+  glam:    { lipstick:{enabled:true,opacity:0.65,color:[30,20,200]}, lip_liner:{enabled:true,opacity:0.60,color:[30,20,200]}, eyeshadow:{enabled:true,opacity:0.50,color:[40,60,100]}, eyebrow:{enabled:true,opacity:0.60,color:[15,15,15]}, blush:{enabled:true,opacity:0.30,color:[100,80,180]}, highlighter:{enabled:true,opacity:0.45}, contour:{enabled:true,opacity:0.35}, foundation:{enabled:true,opacity:0.22,smooth:true} },
+  smoky:   { lipstick:{enabled:true,opacity:0.55,color:[60,20,130]}, lip_liner:{enabled:true,opacity:0.50,color:[60,20,130]}, eyeshadow:{enabled:true,opacity:0.65,color:[40,60,100]}, eyebrow:{enabled:true,opacity:0.55,color:[30,45,80]}, blush:{enabled:true,opacity:0.25,color:[80,110,170]}, highlighter:{enabled:true,opacity:0.30}, contour:{enabled:true,opacity:0.40}, foundation:{enabled:true,opacity:0.18,smooth:true} },
+  fresh:   { lipstick:{enabled:true,opacity:0.35,color:[80,100,240]}, lip_liner:{enabled:false,opacity:0.25,color:[80,100,240]}, eyeshadow:{enabled:true,opacity:0.20,color:[100,120,200]}, eyebrow:{enabled:true,opacity:0.40,color:[90,100,130]}, blush:{enabled:true,opacity:0.25,color:[110,160,240]}, highlighter:{enabled:true,opacity:0.35}, contour:{enabled:false,opacity:0.10}, foundation:{enabled:true,opacity:0.12,smooth:true} },
 };
 
 // ════════════════════════════════════════════════════════
-//  MODE + CAMERA
+//  CAMERA PIPELINE — DECOUPLED SSE ARCHITECTURE
 // ════════════════════════════════════════════════════════
-let mode       = 'camera';  // 'camera' | 'photo'
-let stream     = null;
-let animFrame  = null;
-let processing = false;
-let lastResult = null;      // last processed frame (for BA toggle)
-let showBA     = false;
-let lastRawFrame = null;    // raw unprocessed frame
-let fpsSmooth  = 0;
-let lastFrameT = 0;
+/*
+  OLD (broken — gated on server latency):
+    capture frame → await POST → wait for response → render → repeat
+    Effective FPS = 1000 / server_ms → 3-5 fps at 720p
 
+  NEW (production — fully decoupled):
+    ┌─ rAF render loop (60fps) ──── always draws lastMakeupImg ──────┐
+    │                                                                  │
+    │  push loop (interval) ─── fire-and-forget POST ──▶ server ───┐ │
+    │                                                               │ │
+    │  SSE listener ◀─────── result whenever ready ────────────────┘ │
+    └──────────────────────────────────────────────────────────────────┘
+
+  Key guarantees:
+  • rAF NEVER awaits server → canvas always at 60fps
+  • POST returns 202 immediately → push loop never blocks
+  • Ring buffer on server → only newest frame processed, never stale
+  • Adaptive sendWidth: server tells client what resolution to send
+    based on measured avg_ms → 640px / 480px / 320px auto-switched
+  • SSE reconnects automatically on disconnect
+*/
+
+let mode          = 'camera';
+let stream        = null;
+let animFrame     = null;
+let showBA        = false;
+let lastRawFrame  = null;
+let lastResult    = null;
+let lastMakeupImg = null;   // Image object ready to draw
+let fpsSmooth     = 0;
+let lastFrameT    = 0;
+
+// Adaptive send resolution — updated by server feedback
+let sendWidth     = 480;   // start conservative, server will tune up/down
+let avgMs         = 0;
+
+// SSE connection management
+let sseSource     = null;
+let sseConnected  = false;
+
+// Push loop — interval-based, completely independent of rAF
+let pushInterval  = null;
+let pushCanvas    = null;   // reusable off-screen canvas for encoding
+
+// ── Canvas helpers ────────────────────────────────────────
+function getPushCanvas() {
+  if (!pushCanvas) pushCanvas = document.createElement('canvas');
+  return pushCanvas;
+}
+
+function captureScaledFrame(vid, targetWidth) {
+  const scale = Math.min(1.0, targetWidth / vid.videoWidth);
+  const w = Math.round(vid.videoWidth  * scale);
+  const h = Math.round(vid.videoHeight * scale);
+  const c = getPushCanvas();
+  c.width  = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.save();
+  ctx.scale(-1, 1);                       // mirror for natural camera view
+  ctx.drawImage(vid, -w, 0, w, h);
+  ctx.restore();
+  return c.toDataURL('image/jpeg', 0.65); // JPEG quality 65 — good balance
+}
+
+// ── rAF render loop — ONLY draws, never awaits network ───
+function renderLoop(ts) {
+  if (!stream) return;
+
+  const vid    = document.getElementById('videoEl');
+  const canvas = document.getElementById('canvasEl');
+  const ctx    = canvas.getContext('2d');
+
+  if (!vid.videoWidth) {
+    animFrame = requestAnimationFrame(renderLoop);
+    return;
+  }
+
+  canvas.width  = vid.videoWidth;
+  canvas.height = vid.videoHeight;
+
+  // 1. Draw raw mirrored video — always smooth regardless of server
+  ctx.save();
+  ctx.scale(-1, 1);
+  ctx.drawImage(vid, -canvas.width, 0, canvas.width, canvas.height);
+  ctx.restore();
+
+  // 2. Overlay last makeup result (no awaiting — use whatever we have)
+  if (lastMakeupImg) {
+    if (!showBA) {
+      ctx.drawImage(lastMakeupImg, 0, 0, canvas.width, canvas.height);
+    } else {
+      // Before/After split
+      const splitX = Math.floor(canvas.width / 2);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(splitX, 0, canvas.width - splitX, canvas.height);
+      ctx.clip();
+      ctx.drawImage(lastMakeupImg, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+      // Split line
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      ctx.lineWidth   = 1.5;
+      ctx.beginPath(); ctx.moveTo(splitX, 0); ctx.lineTo(splitX, canvas.height); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.font = '13px "DM Sans", sans-serif';
+      ctx.fillText('BEFORE', 14,         28);
+      ctx.fillText('AFTER',  splitX + 14, 28);
+    }
+  }
+
+  // 3. FPS counter — measures actual display rate, not server rate
+  const now  = performance.now();
+  const diff = now - lastFrameT;
+  if (diff > 0) {
+    fpsSmooth = fpsSmooth * 0.9 + (1000 / diff) * 0.1;
+    document.getElementById('fpsBadge').textContent = Math.round(fpsSmooth) + ' fps';
+  }
+  lastFrameT = now;
+
+  animFrame = requestAnimationFrame(renderLoop);
+}
+
+// ── Push loop — fire-and-forget, completely decoupled ────
+function startPushLoop() {
+  if (pushInterval) return;
+  // Push every 100ms (10 fps max send rate) — server processes as fast as it can
+  // This is separate from the 60fps display loop
+  pushInterval = setInterval(async () => {
+    if (!stream || !sseConnected) return;
+    const vid = document.getElementById('videoEl');
+    if (!vid.videoWidth) return;
+
+    const imageData = captureScaledFrame(vid, sendWidth);
+    try {
+      const resp = await fetch('/api/stream/push', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // keepalive: true ensures the request completes even if page navigates
+        body: JSON.stringify({ image: imageData, params: state }),
+        signal: AbortSignal.timeout(3000),  // 3s max — never hang
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        // Server tells us optimal send resolution based on its latency
+        if (data.send_width && data.send_width !== sendWidth) {
+          sendWidth = data.send_width;
+        }
+      }
+    } catch(e) {
+      // Network hiccup — silent, try again next interval
+    }
+  }, 100);
+}
+
+function stopPushLoop() {
+  if (pushInterval) { clearInterval(pushInterval); pushInterval = null; }
+}
+
+// ── SSE listener — receives processed results ─────────────
+function startSSE() {
+  if (sseSource) return;
+
+  sseSource = new EventSource('/api/stream');
+
+  sseSource.onopen = () => {
+    sseConnected = true;
+    document.getElementById('processingBadge').style.display = 'flex';
+    log.debug?.('SSE connected');
+  };
+
+  sseSource.onmessage = (evt) => {
+    if (!evt.data || evt.data.startsWith(':')) return;  // heartbeat
+    try {
+      const data = JSON.parse(evt.data);
+      if (!data.result) return;
+
+      // Update latency badge
+      avgMs = data.avg_ms ?? avgMs;
+      const lb = document.getElementById('latencyBadge');
+      lb.textContent = `${data.ms}ms`;
+      lb.className   = 'latency-badge' +
+                       (avgMs > 200 ? ' bad' : avgMs > 100 ? ' slow' : '');
+
+      // Adopt adaptive send width from server recommendation
+      if (data.send_width) sendWidth = data.send_width;
+
+      // Load result image in background — draw on next rAF tick
+      lastResult = data.result;
+      const img = new Image();
+      img.onload = () => { lastMakeupImg = img; };
+      img.onerror = () => {};   // never crash on bad data
+      img.src = data.result;
+
+    } catch(e) { /* malformed JSON — ignore */ }
+  };
+
+  sseSource.onerror = () => {
+    sseConnected = false;
+    // Browser auto-reconnects EventSource — no manual retry needed
+    // But we show the badge as "connecting" state
+    document.getElementById('processingBadge').style.display = 'none';
+  };
+}
+
+function stopSSE() {
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  sseConnected = false;
+  document.getElementById('processingBadge').style.display = 'none';
+}
+
+// ════════════════════════════════════════════════════════
+//  CAMERA CONTROL
+// ════════════════════════════════════════════════════════
 function switchMode(m) {
   mode = m;
   document.getElementById('tabCamera').classList.toggle('active', m === 'camera');
@@ -857,16 +591,27 @@ function switchMode(m) {
 
 async function startCamera() {
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { width:1280, height:720 }, audio:false });
+    // Request highest quality — we'll downscale for sending but display native
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      audio: false,
+    });
     const vid = document.getElementById('videoEl');
     vid.srcObject = stream;
     await vid.play();
-    document.getElementById('startBtn').style.display    = 'none';
-    document.getElementById('stopBtn').style.display     = 'flex';
+
+    document.getElementById('startBtn').style.display      = 'none';
+    document.getElementById('stopBtn').style.display       = 'flex';
     document.getElementById('screenshotBtn').style.display = 'flex';
-    document.getElementById('placeholder').style.display = 'none';
-    document.getElementById('fpsBadge').style.display    = 'block';
-    requestAnimationFrame(processLoop);
+    document.getElementById('placeholder').style.display   = 'none';
+    document.getElementById('fpsBadge').style.display      = 'block';
+    document.getElementById('latencyBadge').style.display  = 'block';
+
+    // Start all three loops — they are fully independent
+    animFrame = requestAnimationFrame(renderLoop);   // 60fps display
+    startSSE();                                       // result receiver
+    startPushLoop();                                  // frame sender
+
     toast('Camera started');
   } catch(e) {
     toast('Camera error: ' + e.message);
@@ -874,164 +619,64 @@ async function startCamera() {
 }
 
 function stopCamera() {
+  stopPushLoop();
+  stopSSE();
+
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  cancelAnimationFrame(animFrame);
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+
   lastMakeupImg = null;
-  document.getElementById('startBtn').style.display    = 'flex';
-  document.getElementById('stopBtn').style.display     = 'none';
+  sendWidth     = 480;   // reset to conservative default
+  fpsSmooth     = 0;
+
+  document.getElementById('startBtn').style.display      = 'flex';
+  document.getElementById('stopBtn').style.display       = 'none';
   document.getElementById('screenshotBtn').style.display = 'none';
-  document.getElementById('fpsBadge').style.display    = 'none';
-  document.getElementById('canvasEl').style.display    = 'block';
-}
-
-// ════════════════════════════════════════════════════════
-//  PROCESSING LOOP
-// ════════════════════════════════════════════════════════
-let sendCanvas = null;
-let lastMakeupImg = null;
-
-function getSmallCanvas() {
-  if (!sendCanvas) {
-    sendCanvas = document.createElement('canvas');
-  }
-  return sendCanvas;
-}
-
-async function processLoop(ts) {
-  const vid = document.getElementById('videoEl');
-  if (!vid.videoWidth || !stream) return;
-
-  const canvas = document.getElementById('canvasEl');
-  const ctx    = canvas.getContext('2d');
-  canvas.width  = vid.videoWidth;
-  canvas.height = vid.videoHeight;
-
-  // Draw raw video frame (always shown smoothly)
-  ctx.save();
-  ctx.scale(-1, 1);
-  ctx.drawImage(vid, -canvas.width, 0, canvas.width, canvas.height);
-  ctx.restore();
-
-  // Overlay last makeup result if available
-  if (lastMakeupImg && !showBA) {
-    ctx.drawImage(lastMakeupImg, 0, 0, canvas.width, canvas.height);
-  } else if (lastMakeupImg && showBA) {
-    const splitX = Math.floor(canvas.width / 2);
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(splitX, 0, canvas.width - splitX, canvas.height);
-    ctx.clip();
-    ctx.drawImage(lastMakeupImg, 0, 0, canvas.width, canvas.height);
-    ctx.restore();
-    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(splitX, 0);
-    ctx.lineTo(splitX, canvas.height);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    ctx.font = '13px "DM Sans", sans-serif';
-    ctx.fillText('BEFORE', 14, 28);
-    ctx.fillText('AFTER',  splitX + 14, 28);
-  }
-
-  lastRawFrame = canvas.toDataURL('image/jpeg', 0.7);
-
-  // Send to server (throttled — skip if still busy)
-  if (!processing) {
-    processing = true;
-    document.getElementById('processingBadge').style.display = 'flex';
-
-    // Downscale frame before sending to speed up transfer + processing
-    const sc = getSmallCanvas();
-    const maxW = 480;
-    const scale = Math.min(1, maxW / vid.videoWidth);
-    sc.width  = Math.round(vid.videoWidth  * scale);
-    sc.height = Math.round(vid.videoHeight * scale);
-    const sctx = sc.getContext('2d');
-    sctx.save();
-    sctx.scale(-1, 1);
-    sctx.drawImage(vid, -sc.width, 0, sc.width, sc.height);
-    sctx.restore();
-    const imageData = sc.toDataURL('image/jpeg', 0.6);
-
-    try {
-      const resp = await fetch('/api/apply', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ image: imageData, params: state }),
-      });
-
-      if (resp.ok) {
-        const data = await resp.json();
-
-        if (data.result) {
-          lastResult = data.result;
-          const img = new Image();
-          img.onload = () => { lastMakeupImg = img; };
-          img.src = data.result;
-        }
-
-        // FPS
-        const now  = performance.now();
-        const diff = now - lastFrameT;
-        lastFrameT = now;
-        if (diff > 0) {
-          const fps = 1000 / diff;
-          fpsSmooth = fpsSmooth * 0.85 + fps * 0.15;
-          document.getElementById('fpsBadge').textContent = Math.round(fpsSmooth) + ' fps';
-        }
-      }
-    } catch(e) {
-      // Network error — continue loop silently
-    } finally {
-      processing = false;
-      document.getElementById('processingBadge').style.display = 'none';
-    }
-  }
-
-  animFrame = requestAnimationFrame(processLoop);
+  document.getElementById('fpsBadge').style.display      = 'none';
+  document.getElementById('latencyBadge').style.display  = 'none';
+  document.getElementById('canvasEl').style.display      = 'block';
 }
 
 // ════════════════════════════════════════════════════════
 //  PHOTO MODE
 // ════════════════════════════════════════════════════════
+let lastRawPhotoDataUrl = null;
+
 async function handlePhotoUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
 
-  // Show original preview
   const reader = new FileReader();
   reader.onload = ev => {
     const img = document.getElementById('photoImg');
     img.src = ev.target.result;
     img.style.display = 'block';
     document.getElementById('placeholder').style.display = 'none';
-    lastRawFrame = ev.target.result;
+    lastRawPhotoDataUrl = ev.target.result;
   };
   reader.readAsDataURL(file);
 
-  // Send to server
+  await applyPhotoToServer(file);
+}
+
+async function applyPhotoToServer(file) {
   document.getElementById('processingBadge').style.display = 'flex';
-
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('params', JSON.stringify(state));
-
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('params', JSON.stringify(state));
   try {
-    const resp = await fetch('/api/photo', { method:'POST', body: formData });
+    const resp = await fetch('/api/photo', { method: 'POST', body: fd });
     if (resp.ok) {
       const data = await resp.json();
       if (data.result) {
         lastResult = data.result;
-        const img  = document.getElementById('photoImg');
-        img.src    = data.result;
+        document.getElementById('photoImg').src = data.result;
         document.getElementById('photoSaveBtn').style.display = 'flex';
         toast(`Processed in ${data.ms}ms`);
       }
     } else {
-      const err = await resp.json();
-      toast('Error: ' + (err.error || 'Unknown error'));
+      const err = await resp.json().catch(()=>({}));
+      toast('Error: ' + (err.error || 'Unknown'));
     }
   } catch(e) {
     toast('Network error');
@@ -1040,11 +685,24 @@ async function handlePhotoUpload(e) {
   }
 }
 
+let _reapplyTimer = null;
+async function reapplyPhoto() {
+  if (!lastRawPhotoDataUrl) return;
+  clearTimeout(_reapplyTimer);
+  _reapplyTimer = setTimeout(async () => {
+    // Convert data URL back to File and resubmit
+    const res   = await fetch(lastRawPhotoDataUrl);
+    const blob  = await res.blob();
+    const file  = new File([blob], 'reapply.jpg', { type: 'image/jpeg' });
+    await applyPhotoToServer(file);
+  }, 200);
+}
+
 // ════════════════════════════════════════════════════════
 //  SCREENSHOT
 // ════════════════════════════════════════════════════════
 async function saveScreenshot() {
-  const imgData = (mode === 'photo')
+  const imgData = mode === 'photo'
     ? document.getElementById('photoImg').src
     : document.getElementById('canvasEl').toDataURL('image/jpeg', 0.95);
 
@@ -1058,19 +716,13 @@ async function saveScreenshot() {
     });
     const data = await resp.json();
     if (resp.ok) {
-      // Also trigger a browser download
       const a = document.createElement('a');
-      a.href     = imgData;
-      a.download = data.filename || 'makeup.jpg';
-      a.click();
+      a.href = imgData; a.download = data.filename || 'makeup.jpg'; a.click();
       toast('Saved: ' + data.filename);
     }
   } catch(e) {
-    // Fallback: direct browser download
     const a = document.createElement('a');
-    a.href = imgData;
-    a.download = 'makeup_' + Date.now() + '.jpg';
-    a.click();
+    a.href = imgData; a.download = 'makeup_' + Date.now() + '.jpg'; a.click();
   }
 }
 
@@ -1080,110 +732,64 @@ async function saveScreenshot() {
 function updateParam(layer, key, value) {
   if (!state[layer]) state[layer] = {};
   state[layer][key] = value;
-
-  // If in photo mode with image loaded, re-apply
-  if (mode === 'photo' && lastRawFrame) {
-    reapplyPhoto();
-  }
-}
-
-async function reapplyPhoto() {
-  if (!lastRawFrame) return;
-  // Convert data URL to blob and re-upload
-  const resp  = await fetch(lastRawFrame);
-  const blob  = await resp.blob();
-  const file  = new File([blob], 'reapply.jpg', { type:'image/jpeg' });
-  const fd    = new FormData();
-  fd.append('file', file);
-  fd.append('params', JSON.stringify(state));
-
-  document.getElementById('processingBadge').style.display = 'flex';
-  try {
-    const r = await fetch('/api/photo', { method:'POST', body: fd });
-    if (r.ok) {
-      const d = await r.json();
-      if (d.result) {
-        document.getElementById('photoImg').src = d.result;
-        lastResult = d.result;
-      }
-    }
-  } finally {
-    document.getElementById('processingBadge').style.display = 'none';
-  }
+  if (mode === 'photo' && lastRawPhotoDataUrl) reapplyPhoto();
 }
 
 function applyLook(name) {
   const look = LOOKS[name];
   if (!look) return;
-
-  // Merge look into state
   Object.assign(state, JSON.parse(JSON.stringify(look)));
 
-  // Update all UI toggles to match
   const mapping = {
-    lipstick: 'togLipstick', lip_liner: 'togLipLiner',
-    eyeshadow:'togEyeshadow', eyebrow:'togEyebrow',
-    blush:'togBlush', highlighter:'togHighlighter',
+    lipstick:'togLipstick', lip_liner:'togLipLiner', eyeshadow:'togEyeshadow',
+    eyebrow:'togEyebrow', blush:'togBlush', highlighter:'togHighlighter',
     contour:'togContour', foundation:'togFoundation',
   };
   for (const [layer, id] of Object.entries(mapping)) {
     const el = document.getElementById(id);
-    if (el && state[layer]) el.checked = state[layer].enabled;
+    if (el && state[layer]) el.checked = !!state[layer].enabled;
   }
-
-  // Update active look button
   document.querySelectorAll('.look-btn').forEach(b => {
     b.classList.toggle('active', b.textContent.toLowerCase() === name);
   });
-
   toast(name.charAt(0).toUpperCase() + name.slice(1) + ' look applied');
-
-  if (mode === 'photo' && lastRawFrame) reapplyPhoto();
+  if (mode === 'photo' && lastRawPhotoDataUrl) reapplyPhoto();
 }
 
-function toggleBA(on) {
-  showBA = on;
-}
+function toggleBA(on) { showBA = on; }
 
 // ════════════════════════════════════════════════════════
 //  UI HELPERS
 // ════════════════════════════════════════════════════════
 function toggleLayer(name) {
-  const el = document.getElementById('layer' + name);
-  if (el) el.classList.toggle('open');
+  document.getElementById('layer' + name)?.classList.toggle('open');
 }
 
 function buildSwatches() {
   const sections = [
-    { id:'swatchesLipstick',  layer:'lipstick',  key:'lipstick' },
+    { id:'swatchesLipstick',  layer:'lipstick',  key:'lipstick'  },
     { id:'swatchesEyeshadow', layer:'eyeshadow', key:'eyeshadow' },
-    { id:'swatchesEyebrow',   layer:'eyebrow',   key:'eyebrow' },
-    { id:'swatchesBlush',     layer:'blush',      key:'blush' },
+    { id:'swatchesEyebrow',   layer:'eyebrow',   key:'eyebrow'   },
+    { id:'swatchesBlush',     layer:'blush',     key:'blush'     },
   ];
-
   for (const { id, layer, key } of sections) {
     const container = document.getElementById(id);
     if (!container || !PRESETS[key]) continue;
     container.innerHTML = '';
-
-    let firstKey = null;
+    let isFirst = true;
     for (const [name, preset] of Object.entries(PRESETS[key])) {
-      if (!firstKey) firstKey = name;
       const s = document.createElement('div');
-      s.className = 'swatch' + (firstKey === name ? ' active' : '');
+      s.className    = 'swatch' + (isFirst ? ' active' : '');
       s.style.background = preset.hex;
-      s.title = preset.label;
-      s.dataset.layer = layer;
-      s.dataset.name  = name;
-      s.onclick = function() {
-        // Deactivate siblings
+      s.title        = preset.label;
+      s.onclick = () => {
         container.querySelectorAll('.swatch').forEach(sw => sw.classList.remove('active'));
         s.classList.add('active');
         updateParam(layer, 'color', preset.bgr);
-        // Sync lip liner color to lipstick color
         if (layer === 'lipstick') updateParam('lip_liner', 'color', preset.bgr);
       };
       container.appendChild(s);
+      isFirst = false;
     }
   }
 }
@@ -1219,7 +825,19 @@ async function checkHealth() {
 document.addEventListener('DOMContentLoaded', () => {
   buildSwatches();
   checkHealth();
-  setInterval(checkHealth, 10000);
+  setInterval(checkHealth, 15000);
+
+  // Clean up SSE/streams when tab is hidden or closed
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && stream) {
+      stopPushLoop();   // stop sending frames when tab is hidden
+    } else if (!document.hidden && stream) {
+      startPushLoop();  // resume when tab becomes visible again
+    }
+  });
+  window.addEventListener('beforeunload', () => {
+    stopCamera();
+  });
 });
 </script>
 </body>
