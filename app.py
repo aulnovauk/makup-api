@@ -60,7 +60,7 @@ import cv2
 import numpy as np
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
-# ── Logging ───────────────────────────────────────────────
+# ── Logging (must be set up before any log.* calls) ───────
 _ROOT = Path(__file__).resolve().parent
 logging.basicConfig(
     level=logging.INFO,
@@ -72,8 +72,18 @@ logging.basicConfig(
 )
 log = logging.getLogger("MakeupAI.Web")
 
+# Ensure project root is on path BEFORE importing local modules
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+# Gap fixes — local modules (imported AFTER logging + sys.path are ready)
+try:
+    from landmark_smoother import MultiFaceSmoother
+    from lighting_estimator import LightingEstimator
+    _GAP_FIXES_AVAILABLE = True
+except ImportError:
+    _GAP_FIXES_AVAILABLE = False
+    log.warning("landmark_smoother / lighting_estimator not found — gap fixes disabled")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -89,17 +99,49 @@ ALL_PRESETS      = {
     "blush":     {k:{"bgr":list(v)} for k,v in BLUSH_COLORS.items()},
 }
 
-LIPS_OUTER       = [61,146,91,181,84,17,314,405,321,375,291,308,324,318,402,317,14,87,178,88,95]
-LEFT_EYE_SHADOW  = [226,247,30,29,27,28,56,190,243,112,26,22,23,24,110,25]
-RIGHT_EYE_SHADOW = [446,467,260,259,257,258,286,414,463,341,256,252,253,254,339,255]
-LEFT_EYEBROW     = [70,63,105,66,107,55,65,52,53,46]
-RIGHT_EYEBROW    = [300,293,334,296,336,285,295,282,283,276]
-LEFT_CHEEK       = [116,123,147,213,192,214,210,211]
-RIGHT_CHEEK      = [345,352,376,433,416,434,430,431]
-NOSE_BRIDGE      = [6,197,195,5,4]
-FACE_OVAL        = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109]
-SKIN_SAMPLE_L    = [117,118,119,120,121]
-SKIN_SAMPLE_R    = [346,347,348,349,350]
+FINISH_MATTE    = "matte"
+FINISH_GLOSS    = "gloss"
+FINISH_METALLIC = "metallic"
+FINISH_SHIMMER  = "shimmer" 
+
+# ── Lip regions ──────────────────────────────────────────
+# Full outer boundary (canonical MediaPipe lip contour)
+LIPS_OUTER = [61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146]
+# Inner mouth opening (used to cut a hole so lip fill stays on lip, not beard gap)
+LIPS_INNER_UPPER = [78,191,80,81,82,13,312,311,310,415,308]
+LIPS_INNER_LOWER = [78,95,88,178,87,14,317,402,318,324,308]
+
+# ── Eye shadow — TIGHT to the eyelid crease only ─────────
+# These indices follow the upper eyelid fold precisely.
+# Do NOT use indices 226,190,243 — they map to temple/outer corner
+# and produce large polygons that fall onto the cheek.
+LEFT_EYE_SHADOW  = [33,246,161,160,159,158,157,173,133,155,154,153,145,144,163,7]
+RIGHT_EYE_SHADOW = [263,466,388,387,386,385,384,398,362,382,381,380,374,373,390,249]
+
+# ── Extended shadow (includes socket/crease area) ─────────
+# Used when opacity > 0.4 — deeper, more dramatic look
+LEFT_EYE_SHADOW_DEEP  = [33,246,161,160,159,158,157,173,133,155,154,153,145,144,163,7,
+                          110,24,23,22,26,112,243,190,56,28,27,29,30,247,226]
+RIGHT_EYE_SHADOW_DEEP = [263,466,388,387,386,385,384,398,362,382,381,380,374,373,390,249,
+                          339,254,253,252,256,341,463,414,286,258,257,259,260,467,446]
+
+# ── Eyebrows ──────────────────────────────────────────────
+LEFT_EYEBROW  = [70,63,105,66,107,55,65,52,53,46]
+RIGHT_EYEBROW = [300,293,334,296,336,285,295,282,283,276]
+
+# ── Cheeks — verified not overlapping with eye shadow ─────
+# These sit on the cheekbone, well below the eye region
+LEFT_CHEEK  = [187,207,206,205,50,36,100,101,116,123,147,192,214,210]
+RIGHT_CHEEK = [411,427,426,425,280,266,329,330,345,352,376,416,434,430]
+
+# ── Other regions ─────────────────────────────────────────
+NOSE_BRIDGE = [6,197,195,5,4]
+FACE_OVAL   = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109]
+SKIN_SAMPLE_L = [117,118,119,120,121]
+SKIN_SAMPLE_R = [346,347,348,349,350]
+
+# ── Cupid's bow highlight ─────────────────────────────────
+CUPIDS_BOW = [0,37,39,40,185,61,146,91,181,84]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -125,6 +167,16 @@ class WebMakeupEngine:
         self._landmarker  = mp.tasks.vision.FaceLandmarker.create_from_options(opts)
         self._mask_buf    = None
         self._frame_shape = None
+
+        # Gap Fix #1: One-Euro landmark smoothing
+        if _GAP_FIXES_AVAILABLE:
+            self._smoother  = MultiFaceSmoother(max_faces=2, n_landmarks=478,
+                                                min_cutoff=1.0, beta=0.05)
+            self._estimator = LightingEstimator(ema_alpha=0.08)
+        else:
+            self._smoother  = None
+            self._estimator = None
+
         log.info("WebMakeupEngine ready ✓")
 
     def __del__(self) -> None:
@@ -144,8 +196,8 @@ class WebMakeupEngine:
     def _to_pts(lm, indices, w, h):
         pts = np.empty((len(indices), 2), dtype=np.int32)
         for i, idx in enumerate(indices):
-            pts[i, 0] = int(lm[idx].x * w)
-            pts[i, 1] = int(lm[idx].y * h)
+            pts[i, 0] = int(np.clip(lm[idx].x * w, 0, w - 1))
+            pts[i, 1] = int(np.clip(lm[idx].y * h, 0, h - 1))
         return pts
 
     @staticmethod
@@ -154,31 +206,167 @@ class WebMakeupEngine:
                  if lm[i].visibility is not None and lm[i].visibility > 0]
         return True if not valid else (sum(v > thresh for v in valid) / len(valid)) >= 0.4
 
-    def _region(self, frame, pts, color, alpha, blur_d=9):
+    def _region(self, frame, pts, color, alpha, blur_d=9, erode_px=0):
+        """
+        Blend a makeup color over a landmark region.
+        
+        Strategy — "Screen + Multiply" cosmetic blend:
+          1. Fill polygon mask, optionally erode to prevent edge bleeding
+          2. Gaussian blur the mask for soft edges
+          3. Convert both frame and color to LAB:
+             - Keep L (luminance) from original skin — preserves texture
+             - Blend A and B channels toward the color — adds the tint
+          4. Result: vivid color that follows skin contours naturally
+        
+        erode_px: shrink mask before blurring to prevent color leaking
+                  outside the true anatomical boundary.
+        """
         if len(pts) < 3:
             return frame
         self._mask_buf[:] = 0
         cv2.fillPoly(self._mask_buf, [pts], 255)
-        k    = max(3, (blur_d // 2) * 2 + 1)
-        soft = np.clip(cv2.GaussianBlur(self._mask_buf.astype(np.float32), (k, k), blur_d * 0.6) / 255, 0, 1)
-        fh   = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV).astype(np.float32)
-        ch   = cv2.cvtColor(np.full_like(frame, color, np.uint8), cv2.COLOR_BGR2HSV).astype(np.float32)
-        out  = fh.copy()
-        out[..., 0] = fh[..., 0] * (1 - alpha * soft) + ch[..., 0] * (alpha * soft)
-        out[..., 1] = fh[..., 1] * (1 - alpha * soft) + ch[..., 1] * 0.8 * (alpha * soft)
-        out[..., 2] = np.clip(fh[..., 2] + (ch[..., 2] - 128) * 0.08 * alpha * soft, 0, 255)
-        return cv2.cvtColor(np.clip(out, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR)
+        
+        # Erode to pull mask away from hard anatomical edges
+        # Use a local variable — do NOT reassign self._mask_buf (shared buffer)
+        if erode_px > 0:
+            k_e   = max(3, erode_px * 2 + 1)   # kernel must be odd and ≥ erode_px
+            k_el  = np.ones((k_e, k_e), np.uint8)
+            eroded = cv2.erode(self._mask_buf, k_el, iterations=1)
+        else:
+            eroded = self._mask_buf
+        
+        # Soft gaussian feather (use eroded mask for tight edges)
+        ksize = max(3, (blur_d // 2) * 2 + 1)
+        soft  = cv2.GaussianBlur(
+            eroded.astype(np.float32), (ksize, ksize), blur_d * 0.5
+        )
+        mx   = soft.max()
+        soft = np.clip(soft / (mx + 1e-6), 0.0, 1.0)
+        
+        # LAB blend: keep skin luminance, shift chrominance toward color
+        frame_lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB).astype(np.float32)
+        color_bgr = np.array([[[color[0], color[1], color[2]]]], dtype=np.uint8)
+        color_lab = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+        
+        out_lab = frame_lab.copy()
+        # L: slight darkening toward color lightness (makeup has depth)
+        out_lab[..., 0] = frame_lab[..., 0] * (1 - alpha * soft * 0.15) +                           color_lab[0, 0, 0] * (alpha * soft * 0.15)
+        # A channel (green-red axis)
+        out_lab[..., 1] = frame_lab[..., 1] * (1 - alpha * soft) +                           color_lab[0, 0, 1] * (alpha * soft)
+        # B channel (blue-yellow axis)
+        out_lab[..., 2] = frame_lab[..., 2] * (1 - alpha * soft) +                           color_lab[0, 0, 2] * (alpha * soft)
+        
+        result = cv2.cvtColor(
+            np.clip(out_lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR
+        )
+        
+        return result
+
+    def _region_with_hole(self, frame, outer_pts, hole_pts, color, alpha, blur_d=5):
+        """
+        Fill outer polygon MINUS inner polygon (donut shape).
+        Used for lips: fills the lip area but excludes the mouth opening
+        and inter-lip gap, preventing color from falling on beard/chin.
+        """
+        if len(outer_pts) < 3:
+            return frame
+        self._mask_buf[:] = 0
+        cv2.fillPoly(self._mask_buf, [outer_pts], 255)
+        # Cut hole for mouth opening
+        if len(hole_pts) >= 3:
+            cv2.fillPoly(self._mask_buf, [hole_pts], 0)
+        
+        ksize = max(3, (blur_d // 2) * 2 + 1)
+        soft  = cv2.GaussianBlur(self._mask_buf.astype(np.float32), (ksize, ksize), blur_d * 0.5)
+        soft  = np.clip(soft / (soft.max() + 1e-6), 0.0, 1.0)
+        
+        frame_lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB).astype(np.float32)
+        color_bgr = np.array([[[color[0], color[1], color[2]]]], dtype=np.uint8)
+        color_lab = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+        
+        out_lab = frame_lab.copy()
+        out_lab[..., 0] = frame_lab[..., 0] * (1 - alpha * soft * 0.2) + color_lab[0,0,0] * (alpha * soft * 0.2)
+        out_lab[..., 1] = frame_lab[..., 1] * (1 - alpha * soft) + color_lab[0,0,1] * (alpha * soft)
+        out_lab[..., 2] = frame_lab[..., 2] * (1 - alpha * soft) + color_lab[0,0,2] * (alpha * soft)
+        
+        result = cv2.cvtColor(np.clip(out_lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
+        return result
 
     def _gloss(self, frame, pts):
-        if len(pts) < 3:
-            return frame
+        return self._apply_finish(frame, pts, mode=FINISH_GLOSS)
+
+    def _apply_finish(self, frame, pts, mode=None, hole_pts=None):
+        if mode is None: mode = FINISH_GLOSS
+        if len(pts) < 3: return frame
         self._mask_buf[:] = 0
         cv2.fillPoly(self._mask_buf, [pts], 255)
-        hi = cv2.GaussianBlur(cv2.erode(self._mask_buf, np.ones((5,5),np.uint8), iterations=4), (11,11), 6)
-        hl = np.full_like(frame, (245, 245, 255), np.uint8)
-        a  = hi.astype(np.float32) / 255 * 0.22
-        a3 = cv2.merge([a, a, a])
-        return np.clip(frame.astype(np.float32)*(1-a3) + hl.astype(np.float32)*a3, 0, 255).astype(np.uint8)
+        # Cut inner hole (e.g. mouth opening for lip finish) to prevent
+        # gloss/metallic/shimmer from bleeding into beard-gap area
+        if hole_pts is not None and len(hole_pts) >= 3:
+            cv2.fillPoly(self._mask_buf, [hole_pts], 0)
+        if mode == FINISH_MATTE:
+            region = self._mask_buf > 127
+            if not region.any(): return frame
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV).astype(np.float32)
+            hsv[region, 1] = np.clip(hsv[region, 1] * 1.08, 0, 255)
+            v_mean = float(hsv[region, 2].mean())
+            hsv[region, 2] = hsv[region, 2] * 0.6 + v_mean * 0.4
+            result = cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR)
+            soft = cv2.GaussianBlur(self._mask_buf.astype(np.float32), (7,7), 3) / 255.0 * 0.7
+            s3 = cv2.merge([soft, soft, soft])
+            return np.clip(frame.astype(np.float32)*(1-s3) + result.astype(np.float32)*s3, 0, 255).astype(np.uint8)
+        elif mode == FINISH_GLOSS:
+            hi = cv2.erode(self._mask_buf, np.ones((5,5),np.uint8), iterations=3)
+            hi = cv2.GaussianBlur(hi, (13,13), 7)
+            hl = np.full_like(frame, (250, 250, 255), np.uint8)
+            a  = hi.astype(np.float32) / 255 * 0.28
+            a3 = cv2.merge([a, a, a])
+            return np.clip(frame.astype(np.float32)*(1-a3) + hl.astype(np.float32)*a3, 0, 255).astype(np.uint8)
+        elif mode == FINISH_METALLIC:
+            h, w = frame.shape[:2]
+            M = cv2.moments(self._mask_buf)
+            if M["m00"] == 0: return frame
+            cx = int(M["m10"] / M["m00"]); cy = int(M["m01"] / M["m00"])
+            # Place highlight upper-right of centroid (simulates overhead-right directional light)
+            hx = int(np.clip(cx + w * 0.04, 0, w - 1))
+            hy = int(np.clip(cy - h * 0.03, 0, h - 1))
+            # Build highlight: place point, Gaussian spread, then mask to region
+            # Order matters: mask FIRST, then check if any remains > 0
+            hi_buf = np.zeros(frame.shape[:2], dtype=np.float32)
+            # Check if highlight centre is inside the mask; if not, use centroid
+            if self._mask_buf[hy, hx] == 0:
+                hx, hy = cx, cy
+            hi_buf[hy, hx] = 255.0
+            hi_buf = cv2.GaussianBlur(hi_buf, (25, 25), 10)
+            hi_buf[self._mask_buf == 0] = 0.0   # mask AFTER blur for soft falloff
+            mx = hi_buf.max()
+            if mx < 1.0:   # guard: no valid highlight after masking
+                return frame
+            hi_buf = hi_buf / mx
+            hl = np.full_like(frame, (255, 255, 245), np.uint8)
+            a  = hi_buf * 0.55
+            a3 = cv2.merge([a, a, a])
+            return np.clip(frame.astype(np.float32)*(1-a3) + hl.astype(np.float32)*a3, 0, 255).astype(np.uint8)
+        elif mode == FINISH_SHIMMER:
+            h, w = frame.shape[:2]
+            # Seed changes ~8x per second so sparkle animates without full
+            # randomness each frame (which would look like noise, not shimmer)
+            frame_seed = int(time.perf_counter() * 8) % 1000
+            rng    = np.random.RandomState(frame_seed)
+            n_pts  = 150
+            xs = rng.randint(0, w, n_pts); ys = rng.randint(0, h, n_pts)
+            hi_buf = np.zeros(frame.shape[:2], dtype=np.float32)
+            for px, py in zip(xs, ys):
+                if self._mask_buf[py, px] > 0:
+                    hi_buf[py, px] = float(rng.uniform(0.5, 1.0))
+            hi_buf = cv2.GaussianBlur(hi_buf, (5, 5), 2)
+            mx = hi_buf.max()
+            if mx > 1e-6:
+                hi_buf = hi_buf / mx * 0.40
+            hl = np.full_like(frame, (255, 255, 230), np.uint8)
+            a3 = cv2.merge([hi_buf, hi_buf, hi_buf])
+            return np.clip(frame.astype(np.float32)*(1-a3) + hl.astype(np.float32)*a3, 0, 255).astype(np.uint8)
+        return frame
 
     def _skin(self, frame, lm, w, h):
         px = [frame[int(np.clip(lm[i].y*h,0,h-1)), int(np.clip(lm[i].x*w,0,w-1))].tolist()
@@ -193,101 +381,210 @@ class WebMakeupEngine:
             return self._render(frame, params)
 
     def _render(self, frame, params):
+        """
+        Apply all enabled makeup layers to frame using corrected
+        landmark indices and LAB-space color blending.
+
+        Gap fixes applied here:
+          #1 — One-Euro landmark smoothing (eliminates jitter)
+          #2 — Scene lighting estimation (adapts makeup colors)
+
+        Layer order (bottom to top, matches real makeup application):
+          Foundation → Contour → Blush → Eyeshadow → Eyebrow →
+          Highlighter → Lipstick → Lip Liner
+        """
         self._ensure_buf(frame)
-        h, w  = frame.shape[:2]
-        rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img   = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
-        res   = self._landmarker.detect(img)
-        out   = frame.copy()
+        h, w = frame.shape[:2]
+        rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img  = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
+        res  = self._landmarker.detect(img)
+        out  = frame.copy()
 
         if not res.face_landmarks:
+            # Reset smoother when face is lost — prevents stale state
+            if self._smoother:
+                self._smoother.reset()
             return out
 
-        for lm in res.face_landmarks:
-            p = params   # shorthand
+        # Gap Fix #1: Smooth all detected face landmarks
+        t = time.perf_counter()
+        if self._smoother:
+            face_lms = self._smoother.smooth_all(t, res.face_landmarks)
+        else:
+            face_lms = res.face_landmarks
 
-            # Foundation
-            if p.get("foundation",{}).get("enabled"):
-                fd = p["foundation"];  a = float(fd.get("opacity", 0.15))
+        # Gap Fix #2: Estimate lighting once per frame from the primary face
+        # Calling per-face would double-update the EMA for 2-face sessions
+        if self._estimator and face_lms:
+            scene = self._estimator.analyze(frame, face_lms[0], (h, w))
+        else:
+            scene = None
+
+        for lm_idx, lm in enumerate(face_lms):
+            p = params
+
+            # ── 1. Foundation & skin smooth ───────────────────────────
+            if p.get("foundation", {}).get("enabled"):
+                fd = p["foundation"]
+                a  = float(fd.get("opacity", 0.15))
                 if self._visible(lm, FACE_OVAL):
                     fpts = self._to_pts(lm, FACE_OVAL, w, h)
                     skin = self._skin(frame, lm, w, h)
                     if fd.get("smooth"):
-                        sf   = cv2.bilateralFilter(out, 11, 65, 65)
-                        mf   = np.zeros(out.shape[:2], np.uint8)
+                        # Bilateral filter preserves edges while smoothing pores
+                        sf  = cv2.bilateralFilter(out, 9, 55, 55)
+                        mf  = np.zeros(out.shape[:2], np.uint8)
                         cv2.fillPoly(mf, [fpts], 255)
-                        mf   = cv2.erode(mf, np.ones((5,5),np.uint8), iterations=2)
-                        mf   = cv2.GaussianBlur(mf.astype(np.float32),(25,25),12)/255*0.55
-                        mf3  = cv2.merge([mf,mf,mf])
-                        out  = np.clip(out.astype(np.float32)*(1-mf3)+sf.astype(np.float32)*mf3,0,255).astype(np.uint8)
-                    out = self._region(out, fpts, skin, a*0.45, 19)
+                        mf  = cv2.erode(mf, np.ones((7,7), np.uint8), iterations=3)
+                        mf  = cv2.GaussianBlur(mf.astype(np.float32), (31,31), 14) / 255.0 * 0.6
+                        mf3 = cv2.merge([mf, mf, mf])
+                        out = np.clip(
+                            out.astype(np.float32)*(1-mf3) + sf.astype(np.float32)*mf3,
+                            0, 255
+                        ).astype(np.uint8)
+                    # Apply foundation tint (very subtle, erode=3 to stay inside face oval)
+                    out = self._region(out, fpts, skin, a * 0.35, blur_d=21, erode_px=3)
 
-            # Contour
-            if p.get("contour",{}).get("enabled"):
+            # ── 2. Contour ────────────────────────────────────────────
+            if p.get("contour", {}).get("enabled"):
                 a = float(p["contour"].get("opacity", 0.25))
-                for r in ([234,93,132,58,172,136,150,149,176,148,152],
-                          [454,323,361,288,397,365,379,378,400,377,152],
-                          [116,123,147,213,192,214,210],[345,352,376,433,416,434,430]):
-                    if self._visible(lm, r):
-                        out = self._region(out, self._to_pts(lm,r,w,h), (45,65,95), a*0.7, 15)
+                contour_color = (55, 75, 105)   # cool taupe in BGR
+                contour_regions = [
+                    # Left jaw sweep
+                    [234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152],
+                    # Right jaw sweep
+                    [454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152],
+                    # Left cheek hollow (below cheekbone)
+                    [116, 123, 147, 213, 192, 214, 210],
+                    # Right cheek hollow
+                    [345, 352, 376, 433, 416, 434, 430],
+                ]
+                for region in contour_regions:
+                    if self._visible(lm, region):
+                        pts = self._to_pts(lm, region, w, h)
+                        out = self._region(out, pts, contour_color, a * 0.55, blur_d=17, erode_px=2)
 
-            # Eyebrow
-            if p.get("eyebrow",{}).get("enabled"):
-                ey = p["eyebrow"];  color = tuple(int(c) for c in ey.get("color",[30,45,80]));  a = float(ey.get("opacity",0.45))
-                for brow in (LEFT_EYEBROW, RIGHT_EYEBROW):
-                    if self._visible(lm, brow):
-                        out = self._region(out, self._to_pts(lm,brow,w,h), color, a, 5)
+            # ── 3. Blush ──────────────────────────────────────────────
+            if p.get("blush", {}).get("enabled"):
+                bl    = p["blush"]
+                color = tuple(int(c) for c in bl.get("color", [140,130,230]))
+                a     = float(bl.get("opacity", 0.20))
+                if scene and self._estimator:
+                    color = self._estimator.adapt_color(color, scene, strength=0.30)
+                    a     = self._estimator.adapt_alpha(a, scene)
+                # LEFT_CHEEK / RIGHT_CHEEK now use verified non-overlapping indices
+                for cheek_idx in (LEFT_CHEEK, RIGHT_CHEEK):
+                    if self._visible(lm, cheek_idx):
+                        pts = self._to_pts(lm, cheek_idx, w, h)
+                        # erode_px=2 keeps blush from leaking toward eyes
+                        out = self._region(out, pts, color, a, blur_d=19, erode_px=2)
 
-            # Eyeshadow
-            if p.get("eyeshadow",{}).get("enabled"):
-                es = p["eyeshadow"];  color = tuple(int(c) for c in es.get("color",[40,60,100]));  a = float(es.get("opacity",0.30))
-                for ei in (LEFT_EYE_SHADOW, RIGHT_EYE_SHADOW):
-                    if self._visible(lm, ei):
-                        pts = self._to_pts(lm,ei,w,h)
-                        out = self._region(out, pts, color, a, 11)
-                        self._mask_buf[:] = 0
-                        cv2.fillPoly(self._mask_buf, [pts], 255)
-                        sm  = cv2.GaussianBlur(self._mask_buf.astype(np.float32),(21,21),10)/255*a*0.35
-                        cl  = np.full_like(out, color, np.float32);  ff = out.astype(np.float32)
-                        sc  = 255-(255-ff)*(255-cl)/255
-                        out = np.clip(ff*(1-cv2.merge([sm,sm,sm]))+sc*cv2.merge([sm,sm,sm]),0,255).astype(np.uint8)
+            # ── 4. Eyeshadow ──────────────────────────────────────────
+            if p.get("eyeshadow", {}).get("enabled"):
+                es    = p["eyeshadow"]
+                color = tuple(int(c) for c in es.get("color", [40,60,100]))
+                a     = float(es.get("opacity", 0.30))
+                raw_opacity = a   # preserve user intent for region selection
+                if scene and self._estimator:
+                    color = self._estimator.adapt_color(color, scene, strength=0.25)
+                    a     = self._estimator.adapt_alpha(a, scene)
+                # Choose deep indices based on RAW user opacity, not adapted value
+                if raw_opacity > 0.40:
+                    l_shadow, r_shadow = LEFT_EYE_SHADOW_DEEP, RIGHT_EYE_SHADOW_DEEP
+                else:
+                    l_shadow, r_shadow = LEFT_EYE_SHADOW, RIGHT_EYE_SHADOW
+                for shadow_idx in (l_shadow, r_shadow):
+                    if self._visible(lm, shadow_idx):
+                        pts = self._to_pts(lm, shadow_idx, w, h)
+                        # erode_px=1 critical: prevents shadow leaking below eye onto cheek
+                        out = self._region(out, pts, color, a, blur_d=9, erode_px=1)
 
-            # Highlighter
-            if p.get("highlighter",{}).get("enabled"):
-                a = float(p["highlighter"].get("opacity",0.30));  HL=(230,235,250)
+            # ── 5. Eyebrow fill ───────────────────────────────────────
+            if p.get("eyebrow", {}).get("enabled"):
+                ey    = p["eyebrow"]
+                color = tuple(int(c) for c in ey.get("color", [30,45,80]))
+                a     = float(ey.get("opacity", 0.45))
+                for brow_idx in (LEFT_EYEBROW, RIGHT_EYEBROW):
+                    if self._visible(lm, brow_idx):
+                        pts = self._to_pts(lm, brow_idx, w, h)
+                        # Tight blur (5) and erode (1) keeps brow color inside brow shape
+                        out = self._region(out, pts, color, a, blur_d=5, erode_px=1)
+
+            # ── 6. Highlighter ────────────────────────────────────────
+            if p.get("highlighter", {}).get("enabled"):
+                a  = float(p["highlighter"].get("opacity", 0.30))
+                HL = (240, 245, 255)   # warm pearl white in BGR
+
+                # Nose bridge highlight
                 if self._visible(lm, NOSE_BRIDGE):
-                    out = self._region(out, self._to_pts(lm,NOSE_BRIDGE,w,h), HL, a*0.6, 11)
-                for cb in ([117,118,119,100,126,209,49,131],[346,347,348,329,355,429,279,360]):
-                    if self._visible(lm, cb):
-                        out = self._region(out, self._to_pts(lm,cb,w,h), HL, a*0.5, 13)
+                    pts = self._to_pts(lm, NOSE_BRIDGE, w, h)
+                    out = self._region(out, pts, HL, a * 0.5, blur_d=11)
 
-            # Blush
-            if p.get("blush",{}).get("enabled"):
-                bl = p["blush"];  color = tuple(int(c) for c in bl.get("color",[140,130,230]));  a = float(bl.get("opacity",0.20))
-                for ck in (LEFT_CHEEK, RIGHT_CHEEK):
-                    if self._visible(lm, ck):
-                        out = self._region(out, self._to_pts(lm,ck,w,h), color, a, 13)
+                # Cheekbone highlight (upper cheek, above blush zone)
+                hl_cheeks = (
+                    [117,118,119,100,101,50,36,47,114,188,122,6],   # left
+                    [346,347,348,329,330,280,266,277,343,412,351,6], # right
+                )
+                for hl_pts_idx in hl_cheeks:
+                    if self._visible(lm, hl_pts_idx):
+                        pts = self._to_pts(lm, hl_pts_idx, w, h)
+                        out = self._region(out, pts, HL, a * 0.4, blur_d=15, erode_px=1)
 
-            # Lipstick
-            if p.get("lipstick",{}).get("enabled"):
-                ls = p["lipstick"];  color = tuple(int(c) for c in ls.get("color",[30,20,200]));  a = float(ls.get("opacity",0.45))
+                # Cupid's bow highlight (top center of upper lip)
+                if self._visible(lm, CUPIDS_BOW):
+                    pts = self._to_pts(lm, CUPIDS_BOW, w, h)
+                    out = self._region(out, pts, HL, a * 0.25, blur_d=7)
+
+            # ── 7. Lipstick ───────────────────────────────────────────
+            if p.get("lipstick", {}).get("enabled"):
+                ls    = p["lipstick"]
+                color = tuple(int(c) for c in ls.get("color", [30,20,200]))
+                a     = float(ls.get("opacity", 0.45))
+                # Gap Fix #2: adapt color + alpha to scene lighting
+                if scene and self._estimator:
+                    color = self._estimator.adapt_color(color, scene, strength=0.35)
+                    a     = self._estimator.adapt_alpha(a, scene)
                 if self._visible(lm, LIPS_OUTER):
-                    lpts = self._to_pts(lm,LIPS_OUTER,w,h)
-                    out  = self._region(out, lpts, color, a, 5)
-                    if a < 0.75:
-                        out = self._gloss(out, lpts)
+                    outer_pts = self._to_pts(lm, LIPS_OUTER, w, h)
+                    # Build inner mouth opening mask (excludes beard gap)
+                    # Deduplicate shared endpoints (78 and 308) at corners
+                    inner_u   = self._to_pts(lm, LIPS_INNER_UPPER, w, h)  # 11 pts, starts+ends at 78/308
+                    inner_l   = self._to_pts(lm, LIPS_INNER_LOWER, w, h)  # 11 pts, starts+ends at 78/308
+                    # Skip first point of lower (duplicate of last of upper at 308)
+                    # and reverse so polygon winds consistently
+                    inner_pts = np.vstack([inner_u, inner_l[1:-1][::-1]])
 
-            # Lip liner
-            if p.get("lip_liner",{}).get("enabled"):
-                ll = p["lip_liner"];  color = tuple(int(c) for c in ll.get("color",[30,20,200]));  a = float(ll.get("opacity",0.60))
+                    # Apply lipstick with beard-gap exclusion
+                    out = self._region_with_hole(out, outer_pts, inner_pts, color, a, blur_d=5)
+
+                    # Apply finish mode
+                    finish = ls.get("finish", FINISH_GLOSS)
+                    if finish == FINISH_GLOSS:
+                        lab_l = cv2.cvtColor(
+                            np.array([[[color[0],color[1],color[2]]]], dtype=np.uint8),
+                            cv2.COLOR_BGR2LAB
+                        )[0,0,0]
+                        if lab_l < 40:
+                            finish = FINISH_MATTE
+                    out = self._apply_finish(out, outer_pts, mode=finish, hole_pts=inner_pts)
+
+            # ── 8. Lip liner ──────────────────────────────────────────
+            if p.get("lip_liner", {}).get("enabled"):
+                ll    = p["lip_liner"]
+                color = tuple(int(c) for c in ll.get("color", [30,20,200]))
+                a     = float(ll.get("opacity", 0.60))
                 if self._visible(lm, LIPS_OUTER):
-                    pts = self._to_pts(lm,LIPS_OUTER,w,h)
-                    lm_ = np.zeros(out.shape[:2], np.float32)
-                    cv2.polylines(lm_, [pts], True, 1.0, 2, cv2.LINE_AA)
-                    lm_ = cv2.GaussianBlur(lm_,(3,3),1)
-                    lc  = np.full_like(out, color, np.uint8)
-                    m3  = cv2.merge([lm_*a, lm_*a, lm_*a])
-                    out = np.clip(out.astype(np.float32)*(1-m3)+lc.astype(np.float32)*m3,0,255).astype(np.uint8)
+                    pts = self._to_pts(lm, LIPS_OUTER, w, h)
+                    # Draw a 1px AA polyline into a float mask
+                    liner_mask = np.zeros(out.shape[:2], np.float32)
+                    cv2.polylines(liner_mask, [pts], True, 1.0, 2, cv2.LINE_AA)
+                    liner_mask = cv2.GaussianBlur(liner_mask, (3,3), 1)
+                    liner_color = np.full_like(out, color, np.uint8)
+                    m3  = cv2.merge([liner_mask*a, liner_mask*a, liner_mask*a])
+                    out = np.clip(
+                        out.astype(np.float32)*(1-m3) + liner_color.astype(np.float32)*m3,
+                        0, 255
+                    ).astype(np.uint8)
 
         return out
 
@@ -444,14 +741,6 @@ def _error(msg: str, code: int = 400):
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 
-@app.after_request
-def add_headers(response):
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    return response
-
 try:
     ENGINE = WebMakeupEngine()
     WORKER = StreamWorker(ENGINE)
@@ -467,11 +756,6 @@ SCREENSHOT_DIR.mkdir(exist_ok=True)
 @app.route("/")
 def index():
     return render_template("index.html")
-
-
-@app.route("/favicon.ico")
-def favicon():
-    return Response(status=204)
 
 
 @app.route("/health")
