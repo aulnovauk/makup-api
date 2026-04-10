@@ -21,7 +21,7 @@ v3 uses a **fully decoupled pipeline** with three independent loops:
 
 ### Tier 1: Web Application (Production)
 
-**Frontend** (`templates/index.html`, 845 lines) — Single-file SPA with inline CSS/JS
+**Frontend** (`templates/index.html`, 844 lines) — Single-file SPA with inline CSS/JS
 - **Three independent loops** when camera is active:
   1. `renderLoop()` — rAF at 60fps, draws raw mirrored video + overlays `lastMakeupImg`
   2. `startPushLoop()` — `setInterval(100ms)`, fire-and-forget POST to `/api/stream/push`
@@ -33,7 +33,7 @@ v3 uses a **fully decoupled pipeline** with three independent loops:
 - **Latency badge**: color-coded (green < 100ms, amber < 200ms, red > 200ms)
 - **AbortSignal.timeout(3000)**: push requests never hang longer than 3 seconds
 
-**Backend** (`app.py`, 630 lines) — Flask server with decoupled SSE architecture
+**Backend** (`app.py`, 927 lines) — Flask server with decoupled SSE architecture
 - `WebMakeupEngine` — Thread-safe with `threading.Lock` around MediaPipe calls
 - `StreamWorker` — Background daemon thread that:
   - Reads from a ring buffer (maxsize=1 queue) — newest frame replaces stale one
@@ -42,6 +42,10 @@ v3 uses a **fully decoupled pipeline** with three independent loops:
   - Tracks latency via `LatencyTracker` (20-sample rolling window, avg + p95)
 - `LatencyTracker` — Recommends send resolution: 640px if avg<80ms, 480px if 80-160ms, 320px if >160ms
 - Flask runs with `threaded=True` for concurrent SSE + push handling
+
+### Gap Fixes (Production Quality)
+- **Gap Fix #1** (`landmark_smoother.py`) — One-Euro temporal filter on all 478 face landmarks. Eliminates 2-5px per-frame jitter. `MultiFaceSmoother` manages per-face smoother lifecycle.
+- **Gap Fix #2** (`lighting_estimator.py`) — Grey-world illuminant estimation + skin brightness analysis. Adapts makeup colors to scene lighting (warm/cool tint, dim/bright opacity scaling). EMA-smoothed across frames (alpha=0.08).
 
 ### Tier 2: ML Training Pipeline (BeautyGAN Phase 3)
 Full GAN-based makeup transfer training infrastructure (not used by web UI):
@@ -57,27 +61,30 @@ Full GAN-based makeup transfer training infrastructure (not used by web UI):
 ## Makeup Rendering Pipeline (WebMakeupEngine)
 
 ### Face Detection
-- MediaPipe FaceLandmarker (tasks API v0.10.33+), `RunningMode.IMAGE`, up to 2 faces
+- MediaPipe FaceLandmarker (tasks API), `RunningMode.IMAGE`, up to 2 faces
 - Model: `face_landmarker.task` (3.7MB)
 - `_visible()` — Checks visibility of first 5 landmarks in region; returns True if ≥40% exceed threshold (0.3), or if no visibility data available (graceful fallback)
 
-### Rendering Order (per face)
-1. **Foundation** — Bilateral filter smoothing (d=11, sigma=65) with eroded+blurred mask (0.55 opacity), then skin-color overlay at 45% of user opacity
-2. **Contour** — 4 jaw/cheek sub-regions, fixed BGR (45,65,95) at 70% of user opacity, GaussianBlur mask (d=15)
-3. **Eyebrow Fill** — LEFT/RIGHT_EYEBROW (10 landmarks each), small blur (d=5) for sharp edges
-4. **Eyeshadow** — LEFT/RIGHT_EYE_SHADOW (16 landmarks each), primary color + screen-blend shimmer layer (35% of alpha)
-5. **Highlighter** — Nose bridge (60% alpha) + cheekbone highlights (50% alpha) using custom 8-landmark regions, BGR (230,235,250)
-6. **Blush** — LEFT/RIGHT_CHEEK (8 landmarks each), GaussianBlur mask (d=13)
-7. **Lipstick** — LIPS_OUTER (21 landmarks), small blur (d=5) for crisp edges, gloss only when opacity < 75%
-8. **Lip Liner** — `cv2.polylines` with width=2, anti-aliased, GaussianBlur(3,3) for soft edges
-
 ### Color Blending (`_region()`)
-- GaussianBlur mask instead of bilateral filter (faster, less artifacts)
-- HSV space blending: interpolates Hue and Saturation (sat scaled to 80%), slightly shifts Value based on color brightness
-- Formula: `H_out = H_face*(1-a*m) + H_color*(a*m)`, `S_out = S_face*(1-a*m) + S_color*0.8*(a*m)`, `V_out = V_face + (V_color-128)*0.08*a*m`
+- LAB-space blending: keeps L (luminance) from original skin, shifts A/B chrominance toward makeup color
+- Gaussian blur mask with configurable `blur_d` and `erode_px` for soft edges
+- `_region_with_hole()` — Donut-shaped fill for lips (excludes mouth opening)
 
-### Eyeshadow Screen Blend (new in v3)
-After the base color region, applies a screen blend: `screen = 255 - (255-frame)*(255-color)/255`, mixed at 35% of eyeshadow alpha for shimmer effect
+### Finish Modes (`_apply_finish()`)
+- **Matte** — Reduces V variance, slight saturation boost
+- **Gloss** — Eroded + blurred white highlight at 28% opacity
+- **Metallic** — Directional point-source highlight (upper-right of centroid)
+- **Shimmer** — Animated sparkle points (150 random, seed cycles 8x/sec)
+
+### Rendering Order (per face)
+1. **Foundation** — Bilateral filter smoothing + skin-color tint (erode=3)
+2. **Contour** — 4 jaw/cheek sub-regions, cool taupe BGR (55,75,105)
+3. **Blush** — LEFT/RIGHT_CHEEK (14 landmarks each), blur_d=19, erode_px=2
+4. **Eyeshadow** — Standard (16 landmarks) or deep (31 landmarks) based on opacity>0.40
+5. **Eyebrow Fill** — 10 landmarks each, tight blur_d=5, erode_px=1
+6. **Highlighter** — Nose bridge + cheekbone highlights + Cupid's bow, warm pearl white
+7. **Lipstick** — LIPS_OUTER with inner mouth hole exclusion, finish modes, auto-matte for dark colors (LAB L<40)
+8. **Lip Liner** — AA polylines with Gaussian blur, drawn on top
 
 ## API Routes
 
@@ -120,19 +127,21 @@ state = {
 
 ## Tech Stack
 - **Python 3.12** with Flask (threaded mode)
-- **OpenCV (opencv-python-headless 4.13)** — image processing, HSV blending
-- **MediaPipe 0.10.33** — FaceLandmarker (tasks API)
-- **NumPy 2.4** — array operations
+- **OpenCV (opencv-python-headless)** — image processing, LAB-space blending
+- **MediaPipe** — FaceLandmarker (tasks API)
+- **NumPy** — array operations
 - **System deps**: xorg.libxcb, xorg.libX11, libGL, libz, glib
 
 ## Key Files
 | File | Lines | Purpose |
 |------|-------|---------|
-| `app.py` | 630 | Flask server + WebMakeupEngine + StreamWorker + SSE |
-| `templates/index.html` | 845 | Full SPA (HTML + CSS + JS inline) |
+| `app.py` | 927 | Flask server + WebMakeupEngine + StreamWorker + SSE |
+| `templates/index.html` | 844 | Full SPA (HTML + CSS + JS inline) |
 | `face_landmarker.task` | — | MediaPipe model (3.7MB) |
-| `static/makeup.js` | 363 | Legacy (not used) |
-| `static/style.css` | 214 | Legacy (not used) |
+| `landmark_smoother.py` | 236 | One-Euro temporal landmark smoothing |
+| `lighting_estimator.py` | 246 | Scene lighting estimation + color adaptation |
+| `beautygan.py` | — | GAN discriminator (Tier 2) |
+| `trainer.py` | — | GAN training loop (Tier 2) |
 
 ## Running
 - Development: `python app.py` (port 5000, threaded=True)
